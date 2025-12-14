@@ -30,7 +30,7 @@ export function mountSettings(root){
   const mappingWrap = el("div", { class:"grid grid--2" });
 
   function renderMapping(){
-    clear(mappingWrap);
+    while(mappingWrap.firstChild) mappingWrap.removeChild(mappingWrap.firstChild);
     if(!rows || rows.length === 0){
       mappingWrap.appendChild(el("div", { class:"notice" }, "Upload eerst een dataset om mapping te kunnen instellen."));
       return;
@@ -53,10 +53,10 @@ export function mountSettings(root){
   btnReset.addEventListener("click", ()=>{ Object.assign(current, DEFAULT_MAPPING); renderMapping(); });
 
   const btnClear = el("button", { class:"btn btn--danger", type:"button" }, "Ontkoppel / verwijder dataset");
-  btnClear.addEventListener("click", ()=>{
+  btnClear.addEventListener("click", async ()=>{
     if(!rows || rows.length === 0){ alert("Geen dataset om te verwijderen."); return; }
     if(!confirm("Dataset verwijderen? (Alleen lokaal in je browser.)")) return;
-    clearDataset();
+    await clearDataset();
     mountSettings(root);
   });
 

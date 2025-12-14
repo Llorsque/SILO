@@ -1,13 +1,16 @@
 import { el, clear } from "../../core/dom.js";
 import { router } from "../../core/router.js";
 import { importExcelFile } from "../../core/excel.js";
-import { clearDataset, hasDataset, loadDataset } from "../../core/storage.js";
+import { clearDataset, hasDataset, loadDataset, loadMeta } from "../../core/storage.js";
 
 export function mountHome(root){
   clear(root);
 
   const dataset = loadDataset();
-  const info = dataset ? `${dataset.length.toLocaleString("nl-NL")} rijen geladen` : "Geen dataset geladen";
+  const meta = loadMeta();
+  const info = dataset
+    ? `${dataset.length.toLocaleString("nl-NL")} rijen geladen`
+    : (meta?.rowCount ? `${Number(meta.rowCount).toLocaleString("nl-NL")} rijen geladen` : "Geen dataset geladen");
 
   const uploadInput = el("input", { type:"file", accept:".xlsx,.xls", class:"input" });
   const btnUpload = el("button", { class:"btn btn--primary", type:"button" }, "Upload Excel");
@@ -17,13 +20,16 @@ export function mountHome(root){
   uploadInput.addEventListener("change", async () => {
     const file = uploadInput.files?.[0];
     if(!file) return;
+
     btnUpload.disabled = true;
     btnUpload.textContent = "Bezig met importeren…";
+
     try{
       await importExcelFile(file);
       router.go("home");
     }catch(err){
-      alert("Import mislukt: " + (err?.message || err));
+      const msg = err?.message || String(err);
+      alert("Import mislukt: " + msg);
     }finally{
       btnUpload.disabled = false;
       btnUpload.textContent = "Upload Excel";
@@ -31,10 +37,13 @@ export function mountHome(root){
     }
   });
 
-  btnClear.addEventListener("click", () => {
-    if(!hasDataset()){ alert("Er is geen dataset om te verwijderen."); return; }
-    if(!confirm("Dataset ontkoppelen/verwijderen? (Alleen lokaal in je browser.)")) return;
-    clearDataset();
+  btnClear.addEventListener("click", async () => {
+    if(!hasDataset()){
+      alert("Er is geen dataset om te verwijderen.");
+      return;
+    }
+    if(!confirm("Dataset ontkoppelen/verwijderen? (Dit verwijdert de lokale data in je browser.)")) return;
+    await clearDataset();
     router.go("home");
   });
 

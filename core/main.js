@@ -1,4 +1,6 @@
 import { router } from "./router.js";
+import { initDataset } from "./storage.js";
+
 import { mountHome } from "../modules/home/home.js";
 import { mountDashboard } from "../modules/dashboard/dashboard.js";
 import { mountFilters } from "../modules/filters/filters.js";
@@ -18,4 +20,7 @@ router.register("champions", () => mountChampions(root));
 router.register("overview", () => mountOverview(root));
 router.register("settings", () => mountSettings(root));
 
-router.start();
+(async () => {
+  await initDataset();
+  router.start();
+})();
