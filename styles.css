@@ -49,10 +49,10 @@ h1,h2{margin:0}
 
 .brand{display:flex;align-items:center;gap:12px}
 .logo{
-  width:42px;height:42px;
-  border-radius:14px;
+  width:52px;height:52px;
+  border-radius:18px;
   background: linear-gradient(135deg, var(--brand), rgba(82,232,232,0.22));
-  border:1px solid rgba(82,232,232,0.25);
+  border:1px solid rgba(82,232,232,0.32);
   display:grid;place-items:center;
   font-weight:800;
   letter-spacing:0.5px;
@@ -70,7 +70,7 @@ h1,h2{margin:0}
 .navItem{
   text-align:left;
   padding:11px 12px;
-  border-radius:14px;
+  border-radius:18px;
   border:1px solid transparent;
   background: transparent;
   color:rgba(255,255,255,0.9);
@@ -261,4 +261,44 @@ h1,h2{margin:0}
   .tiles{grid-template-columns: 1fr}
   .h2hSelectors{grid-template-columns: 1fr}
   .control select,.control input{min-width: 100%}
+}
+
+/* --- SILO look & feel tweaks --- */
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  opacity:0.35;
+  background:
+    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mix-blend-mode: overlay;
+}
+
+.logo{position:relative;}
+.logoText{
+  font-size:12px;
+  letter-spacing:1.2px;
+  transform: translateY(1px);
+}
+.logo::before{
+  content:"";
+  position:absolute;
+  inset:7px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,0.12);
+  pointer-events:none;
+}
+
+.brandTitle{position:relative;}
+.brandTitle::after{
+  content:"";
+  display:block;
+  width:44px;
+  height:3px;
+  border-radius:999px;
+  margin-top:6px;
+  background: rgba(82,232,232,0.55);
 }

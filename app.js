@@ -1,4 +1,4 @@
-/* Shorttrack DataTool (v0)
+/* SILO (v0)
    - Single-page, no build step
    - Upload Excel (.xlsx)
    - Auto mapping + manual mapping
@@ -52,7 +52,7 @@ function guessColumn(columns, keywords){
 
 function loadSavedMapping(){
   try{
-    const raw = localStorage.getItem('st_mapping');
+    const raw = localStorage.getItem('silo_mapping');
     if (!raw) return;
     const obj = JSON.parse(raw);
     if (obj && typeof obj === 'object'){
@@ -62,7 +62,7 @@ function loadSavedMapping(){
 }
 
 function saveMapping(){
-  localStorage.setItem('st_mapping', JSON.stringify(state.mapping));
+  localStorage.setItem('silo_mapping', JSON.stringify(state.mapping));
 }
 
 function isNumericLike(v){

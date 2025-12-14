@@ -1,4 +1,4 @@
-# Shorttrack DataTool (v0)
+# SILO (v0) — Shorttrack Data Tool
 
 Deze eerste versie is een **statische webapp** (HTML/CSS/JS) zonder build-step.
 Je kunt 'm direct hosten via **GitHub Pages**.
