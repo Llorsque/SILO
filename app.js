@@ -195,6 +195,9 @@ function setControlsEnabled(enabled){
   el('chYearCol').disabled = !enabled;
   el('chWorldValue').disabled = !enabled;
   el('chOlympicValue').disabled = !enabled;
+
+  // Keep any type-to-search inputs aligned with the underlying select disabled state.
+  syncAllTypeable();
 }
 
 function navInit(){
@@ -218,6 +221,239 @@ function fillSelect(selectEl, options, { includeEmpty = true, emptyLabel = '—'
     opt.textContent = o;
     selectEl.appendChild(opt);
   }
+
+  // If this select is enhanced with a type-to-search UI, keep the input in sync.
+  if (selectEl && typeof selectEl._typeableSync === 'function'){
+    selectEl._typeableSync();
+  }
+}
+
+// ---------------- Type-to-search dropdowns ----------------
+
+// Global registry so we only need one outside-click handler.
+const __typeableRegistry = new Set();
+if (!window.__typeableOutsideClickBound){
+  window.__typeableOutsideClickBound = true;
+  document.addEventListener('click', (e) => {
+    __typeableRegistry.forEach(wrap => {
+      if (!wrap.contains(e.target)){
+        if (typeof wrap._typeableClose === 'function') wrap._typeableClose();
+        else wrap.classList.remove('open');
+      }
+    });
+  });
+}
+
+function syncAllTypeable(){
+  document.querySelectorAll('select[data-typeable="1"]').forEach(sel => {
+    if (sel._typeableInput){
+      sel._typeableInput.disabled = !!sel.disabled;
+    }
+  });
+}
+
+function makeTypeableSelect(selectEl, { placeholder = 'Typ om te zoeken…', maxItems = 250 } = {}){
+  if (!selectEl) return;
+  if (selectEl.dataset.typeable === '1'){
+    if (typeof selectEl._typeableSync === 'function') selectEl._typeableSync();
+    if (selectEl._typeableInput) selectEl._typeableInput.disabled = !!selectEl.disabled;
+    return;
+  }
+  selectEl.dataset.typeable = '1';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'typeSelect';
+  __typeableRegistry.add(wrapper);
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'typeSelectInput';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.placeholder = placeholder;
+
+  // Make label clicks focus the input (if the label uses "for=<selectId>")
+  if (selectEl.id){
+    input.id = `${selectEl.id}__type`;
+    const esc = (window.CSS && typeof CSS.escape === 'function') ? CSS.escape(selectEl.id) : selectEl.id;
+    const lab = document.querySelector(`label[for="${esc}"]`);
+    if (lab) lab.setAttribute('for', input.id);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'typeSelectList';
+
+  // Insert wrapper where the select is, then move select inside wrapper.
+  const parent = selectEl.parentNode;
+  parent.insertBefore(wrapper, selectEl);
+  wrapper.appendChild(input);
+  wrapper.appendChild(list);
+  wrapper.appendChild(selectEl);
+
+  // Hide the native select (we keep it for value + change events)
+  selectEl.classList.add('srOnly');
+
+  let activeIdx = -1;
+  let currentItems = [];
+
+  const normText = (s) => String(s ?? '').toLowerCase();
+  const selectedText = () => {
+    const opt = selectEl.options[selectEl.selectedIndex];
+    return opt ? (opt.textContent ?? '') : '';
+  };
+
+  const close = () => {
+    wrapper.classList.remove('open');
+    list.innerHTML = '';
+    activeIdx = -1;
+    currentItems = [];
+  };
+
+  // Used by the global outside-click handler.
+  wrapper._typeableClose = close;
+
+  const open = () => {
+    if (selectEl.disabled) return;
+    wrapper.classList.add('open');
+  };
+
+  const render = (filterText) => {
+    const q = normText(filterText).trim();
+    const opts = [...selectEl.options].map(o => ({ value: o.value, text: (o.textContent ?? '') }));
+
+    let items = opts;
+    if (q){
+      items = opts.filter(o => normText(o.text).includes(q));
+    }
+    items = items.slice(0, maxItems);
+
+    currentItems = items;
+    activeIdx = -1;
+
+    list.innerHTML = '';
+    if (!items.length){
+      const empty = document.createElement('div');
+      empty.className = 'typeSelectEmpty';
+      empty.textContent = 'Geen matches';
+      list.appendChild(empty);
+      return;
+    }
+
+    items.forEach((it, idx) => {
+      const row = document.createElement('div');
+      row.className = 'typeSelectOption';
+      row.dataset.idx = String(idx);
+      row.textContent = it.text;
+      if (String(selectEl.value) === String(it.value)){
+        row.classList.add('selected');
+      }
+      row.addEventListener('mousedown', (e) => {
+        // mousedown so we can select before blur closes the list
+        e.preventDefault();
+        setValue(it.value, it.text);
+        close();
+      });
+      list.appendChild(row);
+    });
+  };
+
+  const setValue = (val, text) => {
+    selectEl.value = val;
+    input.value = text ?? selectedText();
+    selectEl.dispatchEvent(new Event('change', { bubbles:true }));
+  };
+
+  // Keep input aligned with select
+  selectEl._typeableInput = input;
+  selectEl._typeableSync = () => {
+    input.disabled = !!selectEl.disabled;
+    // If select has no value, show empty string instead of "—" label by default.
+    const txt = selectedText();
+    input.value = (selectEl.value === '' ? '' : txt);
+  };
+  selectEl._typeableSync();
+
+  input.addEventListener('focus', () => {
+    open();
+    render(input.value);
+  });
+  input.addEventListener('click', () => {
+    open();
+    render(input.value);
+  });
+  input.addEventListener('input', () => {
+    open();
+    render(input.value);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (!wrapper.classList.contains('open')){
+      if (e.key === 'ArrowDown'){
+        open();
+        render(input.value);
+        e.preventDefault();
+      }
+      return;
+    }
+
+    const rows = [...list.querySelectorAll('.typeSelectOption')];
+    if (e.key === 'ArrowDown'){
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, rows.length - 1);
+    }else if (e.key === 'ArrowUp'){
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+    }else if (e.key === 'Enter'){
+      e.preventDefault();
+      if (activeIdx >= 0 && currentItems[activeIdx]){
+        const it = currentItems[activeIdx];
+        setValue(it.value, it.text);
+      }else if (currentItems.length){
+        // Pick first match
+        setValue(currentItems[0].value, currentItems[0].text);
+      }
+      close();
+      return;
+    }else if (e.key === 'Escape'){
+      e.preventDefault();
+      close();
+      input.blur();
+      return;
+    }else{
+      return;
+    }
+
+    rows.forEach(r => r.classList.remove('active'));
+    const r = rows[activeIdx];
+    if (r){
+      r.classList.add('active');
+      // scroll into view
+      const rTop = r.offsetTop;
+      const rBottom = rTop + r.offsetHeight;
+      if (rTop < list.scrollTop) list.scrollTop = rTop;
+      if (rBottom > list.scrollTop + list.clientHeight) list.scrollTop = rBottom - list.clientHeight;
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    // Give click handlers time to run
+    window.setTimeout(() => {
+      if (!wrapper.contains(document.activeElement)){
+        // If input doesn't match an option exactly, revert to selected value
+        const t = input.value.trim();
+        const opts = [...selectEl.options].map(o => ({ value:o.value, text:(o.textContent ?? '').trim() }));
+        const exact = opts.find(o => o.text.toLowerCase() === t.toLowerCase());
+        if (exact){
+          setValue(exact.value, exact.text);
+        }else{
+          selectEl._typeableSync();
+        }
+        close();
+      }
+    }, 120);
+  });
+
+  // Outside clicks are handled globally.
 }
 
 function applyAutoMapping(){
@@ -268,6 +504,10 @@ function updateMappingUI(){
   mapEls.rank.value = state.mapping.rank ?? '';
   mapEls.date.value = state.mapping.date ?? '';
   mapEls.competition.value = state.mapping.competition ?? '';
+
+  // Make mapping dropdowns typeable.
+  Object.values(mapEls).forEach(sel => makeTypeableSelect(sel, { placeholder:'Typ om een kolom te zoeken…' }));
+  syncAllTypeable();
 }
 
 function updateModuleInputs(){
@@ -277,13 +517,19 @@ function updateModuleInputs(){
   riders.sort((a,b) => a.localeCompare(b,'nl'));
   fillSelect(el('dashRider'), riders, { includeEmpty:false });
   el('dashRider').disabled = riders.length === 0;
+  makeTypeableSelect(el('dashRider'), { placeholder:'Typ om een rijder te zoeken…' });
 
   // H2H metric col list
   fillSelect(el('h2hMetric'), state.columns, { includeEmpty:false });
+  makeTypeableSelect(el('h2hMetric'), { placeholder:'Typ om een kolom te zoeken…' });
+  makeTypeableSelect(el('h2hAgg'), { placeholder:'Typ om te zoeken…' });
+  makeTypeableSelect(el('h2hCount'), { placeholder:'Typ aantal…' });
 
   // Champions selects
   fillSelect(el('chTypeCol'), state.columns, { includeEmpty:true, emptyLabel:'—' });
   fillSelect(el('chYearCol'), state.columns, { includeEmpty:true, emptyLabel:'—' });
+  makeTypeableSelect(el('chTypeCol'), { placeholder:'Typ om een kolom te zoeken…' });
+  makeTypeableSelect(el('chYearCol'), { placeholder:'Typ om een kolom te zoeken…' });
 
   // Query default first rule
   if (state.rules.length === 0 && state.columns.length){
@@ -296,6 +542,8 @@ function updateModuleInputs(){
 
   // Seed default metric rows
   seedDefaultMetricRows();
+
+  syncAllTypeable();
 }
 
 function openMapping(){
@@ -607,7 +855,14 @@ function renderRules(){
     });
 
     wrap.appendChild(row);
+
+    // Enhance dropdowns *after* they are in the DOM (so they have a parentNode).
+    makeTypeableSelect(logicSel, { placeholder:'Typ AND/OR…' });
+    makeTypeableSelect(colSel, { placeholder:'Typ om een kolom te zoeken…' });
+    makeTypeableSelect(opSel, { placeholder:'Typ om een operator te zoeken…' });
   });
+
+  syncAllTypeable();
 }
 
 function evalRule(rule, row){
@@ -727,7 +982,12 @@ function buildH2HSelectors(){
     c.appendChild(lab);
     c.appendChild(sel);
     wrap.appendChild(c);
+
+    // Enhance dropdown *after* it's in the DOM.
+    makeTypeableSelect(sel, { placeholder:'Typ om een rijder te zoeken…' });
   }
+
+  syncAllTypeable();
 }
 
 function seedDefaultMetricRows(){

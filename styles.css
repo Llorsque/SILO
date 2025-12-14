@@ -118,6 +118,33 @@ h1,h2{margin:0}
 }
 .control select:disabled,.control input:disabled{opacity:0.55}
 
+/* Type-to-search dropdown wrapper (for all selects) */
+.control .typeSelect{position:relative; min-width:220px; width:100%}
+.typeSelectList{
+  position:absolute;
+  left:0; right:0;
+  top: calc(100% + 6px);
+  max-height: 280px;
+  overflow:auto;
+  background: rgba(17,26,51,0.98);
+  border:1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 80;
+  display:none;
+}
+.typeSelect.open .typeSelectList{display:block}
+.typeSelectOption, .typeSelectEmpty{
+  padding: 10px 10px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.88);
+}
+.typeSelectOption{cursor:pointer}
+.typeSelectOption:hover{background: rgba(82,232,232,0.10)}
+.typeSelectOption.active{background: rgba(82,232,232,0.14)}
+.typeSelectOption.selected{outline:1px solid rgba(82,232,232,0.20)}
+.typeSelectEmpty{color: rgba(255,255,255,0.55)}
+
 .btn{
   border:1px solid rgba(255,255,255,0.16);
   padding:10px 12px;
@@ -261,6 +288,7 @@ h1,h2{margin:0}
   .tiles{grid-template-columns: 1fr}
   .h2hSelectors{grid-template-columns: 1fr}
   .control select,.control input{min-width: 100%}
+  .control .typeSelect{min-width:100%}
 }
 
 /* --- SILO look & feel tweaks --- */
