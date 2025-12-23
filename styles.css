@@ -42,6 +42,8 @@ body{
 }
 .brand__name{font-weight:800; letter-spacing:.10em}
 .brand__tag{font-size:12px; color:var(--muted)}
+.topbar__actions{display:flex; gap:10px; align-items:center}
+
 .app{padding:18px; max-width:1200px; margin:0 auto}
 .footer{
   padding:18px;
@@ -62,11 +64,13 @@ body{
 .card__bd{padding:16px}
 .card__title{font-size:16px;font-weight:800;margin:0 0 6px 0}
 .card__sub{margin:0;color:var(--muted);font-size:13px}
+
 .grid{display:grid;gap:14px}
 .grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .grid--3{grid-template-columns:repeat(3,minmax(0,1fr))}
 @media (max-width:900px){.grid--3{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.grid--2,.grid--3{grid-template-columns:1fr}}
+
 .btn{
   appearance:none;border:1px solid var(--line);
   background: rgba(255,255,255,.04);
@@ -88,6 +92,14 @@ body{
   background: rgba(255,90,106,.10);
 }
 .btn--ghost{background:transparent}
+.btn--icon{
+  width:44px;
+  padding:10px 0;
+  text-align:center;
+  font-size:18px;
+  line-height:1;
+}
+
 .btn--xl{
   padding:18px 18px;
   border-radius:22px;
@@ -99,31 +111,39 @@ body{
 }
 .btn__kicker{font-size:12px;color:var(--muted);font-weight:700}
 .btn__label{font-size:18px}
+
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .spacer{flex:1}
 .muted{color:var(--muted)}
 .hr{height:1px;background:var(--line);margin:14px 0}
+
 .notice{
   padding:12px 14px;
   border-radius:14px;
   background: rgba(82,232,232,.08);
   border:1px solid rgba(82,232,232,.18);
 }
+
 .kpiGrid{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(0,1fr))}
 @media (max-width:900px){.kpiGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .kpi{padding:14px;border-radius:16px;border:1px solid var(--line);background: rgba(255,255,255,.03)}
 .kpi__val{font-size:22px;font-weight:900}
 .kpi__lbl{font-size:12px;color:var(--muted);margin-top:4px}
+
 .table{width:100%;border-collapse:collapse;overflow:hidden;border-radius:14px;border:1px solid var(--line)}
 .table th,.table td{padding:10px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
 .table th{color:var(--muted);font-weight:800}
 .table tr:last-child td{border-bottom:none}
+
 .input{width:100%;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background: rgba(0,0,0,.18);color:var(--text)}
 .input:focus{outline:none;border-color: rgba(82,232,232,.35)}
+
 .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;border:1px solid var(--line);background: rgba(255,255,255,.03);font-size:12px;color:var(--muted)}
+
 .menuGrid{display:grid;gap:14px;grid-template-columns:repeat(3,minmax(0,1fr))}
 @media (max-width:900px){.menuGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.menuGrid{grid-template-columns:1fr}}
+
 .searchable{position:relative}
 .searchable__panel{
   position:absolute;left:0;right:0;margin-top:8px;

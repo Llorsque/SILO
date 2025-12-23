@@ -56,7 +56,7 @@ export function mountHome(root){
   root.appendChild(el("section", { class:"card" }, [
     el("div", { class:"card__hd" }, [
       el("h2", { class:"card__title" }, "Hoofdmenu"),
-      el("p", { class:"card__sub" }, "6 modules • Upload je Excel op dit scherm.")
+      el("p", { class:"card__sub" }, "Modules • Upload je Excel op dit scherm. Instellingen via het tandwiel rechtsboven.")
     ]),
     el("div", { class:"card__bd" }, [
       el("div", { class:"row" }, [
@@ -70,8 +70,7 @@ export function mountHome(root){
         menuBtn("Filters & Parameters", "Combineer filters", "filters"),
         menuBtn("Head-to-Head", "Vergelijk rijders", "headtohead"),
         menuBtn("Kampioenen", "WK / OS", "champions"),
-        menuBtn("Overzicht", "Dataset samenvatting", "overview"),
-        menuBtn("Instellingen", "Mapping & beheer", "settings"),
+        menuBtn("Biografie", "Rijderprofiel", "overview"),
       ])
     ])
   ]));
