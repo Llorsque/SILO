@@ -3,6 +3,7 @@ import { sectionCard } from "../../core/layout.js";
 import { loadDataset, getMappingWithFallback } from "../../core/storage.js";
 import { uniq, toNumber } from "../../core/utils.js";
 import { createSearchableSelect } from "../../core/components/searchableSelect.js";
+import { createSearchableMultiSelect } from "../../core/components/searchableMultiSelect.js";
 
 export function mountDashboard(root){
   clear(root);
@@ -20,8 +21,7 @@ export function mountDashboard(root){
   const columns = Object.keys(allRows[0] || {});
   const map = getMappingWithFallback(columns);
 
-  // Prioriteit: exact gelijknamige kolommen uit Excel.
-  // Fallback: mapping (voor het geval kolomnamen afwijken).
+  // Exacte Excel-kolommen als prioriteit
   const pick = (preferred, fallback) => columns.includes(preferred) ? preferred : fallback;
 
   const col = {
@@ -51,49 +51,37 @@ export function mountDashboard(root){
     return;
   }
 
-  // ---------- Helpers ----------
-  const norm = (v) => String(v ?? "").trim(); // belangrijk: trims zodat filters écht matchen
-  const eq = (a, b) => norm(a) === norm(b);
+  const norm = (v) => String(v ?? "").trim();
 
   function parseYear(v){
-    // expected: dd-mm-yyyy (e.g. 02-11-2019)
     const s = norm(v);
     if(!s) return null;
-
     const m = s.match(/^(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{4})$/);
     if(m) return Number(m[3]);
-
     const m2 = s.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})$/);
     if(m2) return Number(m2[1]);
-
     const d = new Date(s);
     if(!Number.isNaN(d.getTime())) return d.getFullYear();
     return null;
   }
 
-  const uniqSorted = (values) =>
-    uniq(values.map(norm)).sort((a,b) => a.localeCompare(b, "nl"));
+  const uniqSorted = (values) => uniq(values.map(norm).filter(Boolean)).sort((a,b)=>a.localeCompare(b,"nl"));
 
-  const withAll = (arr, allLabel) => [{ value:"ALL", label: allLabel }, ...arr.map(v => ({ value:v, label:v }))];
-
-  // ---------- Filter state ----------
+  // Filter state: multi-select => Set. Leeg = "Alles"
   const state = {
-    year: "ALL",
-    competition: "ALL",
-    location: "ALL",
-    distance: "ALL",
-    sex: "ALL",
-    season: "ALL",
-    winner: "ALL",
-    nat: "ALL",
-    rider: "ALL",
+    year: new Set(),
+    competition: new Set(),
+    location: new Set(),
+    distance: new Set(),
+    sex: new Set(),
+    season: new Set(),
+    winner: new Set(),
+    nat: new Set(),
+    rider: "ALL" // tiles-focus
   };
 
-  // ---------- Build option lists from dataset (on purpose: from Excel columns) ----------
-  const years = uniq(allRows.map(r => parseYear(r[col.date])).filter(y => y != null))
-    .map(String)
-    .sort((a,b) => a.localeCompare(b, "nl"));
-
+  // Options from column values
+  const years = uniq(allRows.map(r => parseYear(r[col.date])).filter(y => y != null)).map(String).sort((a,b)=>a.localeCompare(b,"nl"));
   const competitions = uniqSorted(allRows.map(r => r[col.competition]));
   const locations    = uniqSorted(allRows.map(r => r[col.location]));
   const distances    = uniqSorted(allRows.map(r => r[col.distance]));
@@ -102,85 +90,22 @@ export function mountDashboard(root){
   const winners      = uniqSorted(allRows.map(r => r[col.winner]));
   const nats         = uniqSorted(allRows.map(r => r[col.nat]));
 
-  // ---------- UI ----------
   const infoPill = el("div", { class:"pill" }, "—");
   const kpiWrap = el("div", { class:"kpiGrid" });
-  const riderHost = el("div", { id:"siloRiderHost", style:"min-width:320px; flex:1" });
 
-  const yearSel = createSearchableSelect({
-    label: "Jaartal (op basis van Datum)",
-    options: withAll(years, "Alle jaren"),
-    value: state.year,
-    onChange: (v) => { state.year = v; refresh(); }
-  });
-  const compSel = createSearchableSelect({
-    label: "Wedstrijd",
-    options: withAll(competitions, "Alle wedstrijden"),
-    value: state.competition,
-    onChange: (v) => { state.competition = v; refresh(); }
-  });
-  const locSel = createSearchableSelect({
-    label: "Locatie",
-    options: withAll(locations, "Alle locaties"),
-    value: state.location,
-    onChange: (v) => { state.location = v; refresh(); }
-  });
-  const distSel = createSearchableSelect({
-    label: "Afstand",
-    options: withAll(distances, "Alle afstanden"),
-    value: state.distance,
-    onChange: (v) => { state.distance = v; refresh(); }
-  });
-  const sexSel = createSearchableSelect({
-    label: "Sekse",
-    options: withAll(sexes, "Alle"),
-    value: state.sex,
-    onChange: (v) => { state.sex = v; refresh(); }
-  });
-  const seasonSel = createSearchableSelect({
-    label: "Seizoen",
-    options: withAll(seasons, "Alle seizoenen"),
-    value: state.season,
-    onChange: (v) => { state.season = v; refresh(); }
-  });
-  const winnerSel = createSearchableSelect({
-    label: "Winnaar",
-    options: withAll(winners, "Alle winnaars"),
-    value: state.winner,
-    onChange: (v) => { state.winner = v; refresh(); }
-  });
-  const natSel = createSearchableSelect({
-    label: "Nationaliteit",
-    options: withAll(nats, "Alle nationaliteiten"),
-    value: state.nat,
-    onChange: (v) => { state.nat = v; refresh(); }
-  });
-
-  const filtersGrid = el("div", { class:"grid grid--3" }, [
-    yearSel.el,
-    compSel.el,
-    locSel.el,
-    distSel.el,
-    sexSel.el,
-    seasonSel.el,
-    winnerSel.el,
-    natSel.el,
-  ]);
-
-  // ---------- Filtering ----------
   function applyFilters(){
     return allRows.filter(r => {
-      if(state.year !== "ALL"){
-        const y = parseYear(r[col.date]);
-        if(String(y ?? "") !== String(state.year)) return false;
+      if(state.year.size){
+        const y = String(parseYear(r[col.date]) ?? "");
+        if(!state.year.has(y)) return false;
       }
-      if(state.competition !== "ALL" && !eq(r[col.competition], state.competition)) return false;
-      if(state.location    !== "ALL" && !eq(r[col.location], state.location)) return false;
-      if(state.distance    !== "ALL" && !eq(r[col.distance], state.distance)) return false;
-      if(state.sex         !== "ALL" && !eq(r[col.sex], state.sex)) return false;
-      if(state.season      !== "ALL" && !eq(r[col.season], state.season)) return false;
-      if(state.winner      !== "ALL" && !eq(r[col.winner], state.winner)) return false;
-      if(state.nat         !== "ALL" && !eq(r[col.nat], state.nat)) return false;
+      if(state.competition.size && !state.competition.has(norm(r[col.competition]))) return false;
+      if(state.location.size    && !state.location.has(norm(r[col.location]))) return false;
+      if(state.distance.size    && !state.distance.has(norm(r[col.distance]))) return false;
+      if(state.sex.size         && !state.sex.has(norm(r[col.sex]))) return false;
+      if(state.season.size      && !state.season.has(norm(r[col.season]))) return false;
+      if(state.winner.size      && !state.winner.has(norm(r[col.winner]))) return false;
+      if(state.nat.size         && !state.nat.has(norm(r[col.nat]))) return false;
       return true;
     });
   }
@@ -202,7 +127,7 @@ export function mountDashboard(root){
 
     let rows = filteredRows;
     if(state.rider !== "ALL"){
-      rows = filteredRows.filter(r => eq(r[col.rider], state.rider));
+      rows = filteredRows.filter(r => norm(r[col.rider]) === norm(state.rider));
       if(!rows.length){
         kpiWrap.appendChild(el("div", { class:"notice" }, "Geen rijen voor deze rijder binnen de gekozen filters."));
         return;
@@ -223,19 +148,20 @@ export function mountDashboard(root){
     kpiWrap.appendChild(tile(avg == null ? "—" : avg.toFixed(2), "Gem. ranking"));
   }
 
-  function buildRiderSelect(filteredRows){
+  // Rider select (single) depends on filtered dataset
+  const riderHost = el("div", {});
+  function rebuildRiderSelect(filteredRows){
+    clear(riderHost);
     const riders = uniqSorted(filteredRows.map(r => r[col.rider]));
-    if(state.rider !== "ALL" && !riders.includes(norm(state.rider))){
-      state.rider = "ALL";
-    }
+    if(state.rider !== "ALL" && !riders.includes(norm(state.rider))) state.rider = "ALL";
     const opts = [{ value:"ALL", label:"Alle rijders (samengevoegd)" }, ...riders.map(r => ({ value:r, label:r }))];
-    const sel = createSearchableSelect({
-      label: "Rijder",
+    const riderSel = createSearchableSelect({
+      label: "Rijder (voor tiles)",
       options: opts,
       value: state.rider,
       onChange: (v) => { state.rider = v; refreshKPIsOnly(); }
     });
-    return sel.el;
+    riderHost.appendChild(riderSel.el);
   }
 
   function refreshKPIsOnly(){
@@ -247,47 +173,118 @@ export function mountDashboard(root){
   function refresh(){
     const filtered = applyFilters();
     infoPill.textContent = `${filtered.length.toLocaleString("nl-NL")} rijen (van ${allRows.length.toLocaleString("nl-NL")})`;
-
-    clear(riderHost);
-    riderHost.appendChild(buildRiderSelect(filtered));
-
+    rebuildRiderSelect(filtered);
     renderKPIs(filtered);
   }
 
-  const btnReset = el("button", { class:"btn", type:"button" }, "Reset filters");
+  // Multi-select filters (left sidebar)
+  const fYear = createSearchableMultiSelect({
+    label:"Jaartal (Datum)",
+    options: years.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle jaren",
+    onChange:(vals)=>{ state.year = new Set(vals.map(String)); refresh(); }
+  });
+  const fComp = createSearchableMultiSelect({
+    label:"Wedstrijd",
+    options: competitions.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle wedstrijden",
+    onChange:(vals)=>{ state.competition = new Set(vals.map(norm)); refresh(); }
+  });
+  const fLoc = createSearchableMultiSelect({
+    label:"Locatie",
+    options: locations.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle locaties",
+    onChange:(vals)=>{ state.location = new Set(vals.map(norm)); refresh(); }
+  });
+  const fDist = createSearchableMultiSelect({
+    label:"Afstand",
+    options: distances.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle afstanden",
+    onChange:(vals)=>{ state.distance = new Set(vals.map(norm)); refresh(); }
+  });
+  const fSex = createSearchableMultiSelect({
+    label:"Sekse",
+    options: sexes.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle",
+    onChange:(vals)=>{ state.sex = new Set(vals.map(norm)); refresh(); }
+  });
+  const fSeason = createSearchableMultiSelect({
+    label:"Seizoen",
+    options: seasons.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle seizoenen",
+    onChange:(vals)=>{ state.season = new Set(vals.map(norm)); refresh(); }
+  });
+  const fWinner = createSearchableMultiSelect({
+    label:"Winnaar",
+    options: winners.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle winnaars",
+    onChange:(vals)=>{ state.winner = new Set(vals.map(norm)); refresh(); }
+  });
+  const fNat = createSearchableMultiSelect({
+    label:"Nationaliteit",
+    options: nats.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle nationaliteiten",
+    onChange:(vals)=>{ state.nat = new Set(vals.map(norm)); refresh(); }
+  });
+
+  const btnReset = el("button", { class:"btn", type:"button" }, "Reset alle filters");
   btnReset.addEventListener("click", () => {
-    state.year = "ALL";
-    state.competition = "ALL";
-    state.location = "ALL";
-    state.distance = "ALL";
-    state.sex = "ALL";
-    state.season = "ALL";
-    state.winner = "ALL";
-    state.nat = "ALL";
+    state.year = new Set();
+    state.competition = new Set();
+    state.location = new Set();
+    state.distance = new Set();
+    state.sex = new Set();
+    state.season = new Set();
+    state.winner = new Set();
+    state.nat = new Set();
     state.rider = "ALL";
-    // remount = ook alle select inputs resetten
     mountDashboard(root);
   });
 
-  // initial render
-  refresh();
+  const layout = el("div", { class:"dashboardLayout" });
 
-  root.appendChild(sectionCard({
-    title: "Dashboard",
-    subtitle: "Filters toepassen en daarna een rijder kiezen voor de tiles.",
-    children: [
-      el("div", { class:"row" }, [
-        el("div", { style:"min-width:240px" }, btnReset),
-        el("div", { class:"spacer" }),
-        infoPill
-      ]),
+  const sidebar = sectionCard({
+    title:"Filters",
+    subtitle:"Multi-select • Leeg = alles",
+    children:[
+      el("div", { class:"filtersStack" }, [
+        fYear.el,
+        fComp.el,
+        fLoc.el,
+        fDist.el,
+        fSex.el,
+        fSeason.el,
+        fWinner.el,
+        fNat.el,
+        el("div", { class:"row" }, [btnReset]),
+      ])
+    ]
+  });
+  sidebar.classList.add("sidebarCard");
+
+  const main = sectionCard({
+    title:"Dashboard",
+    subtitle:"Tiles zijn netjes uitgelijnd en volgen je filters.",
+    children:[
+      el("div", { class:"row" }, [infoPill]),
       el("div", { class:"hr" }),
-      el("div", { class:"muted", style:"font-size:12px; font-weight:800; margin:0 0 8px 2px" }, "Filters"),
-      filtersGrid,
-      el("div", { class:"hr" }),
-      el("div", { class:"row" }, [riderHost]),
+      riderHost,
       el("div", { class:"hr" }),
       kpiWrap
     ]
-  }));
+  });
+
+  layout.appendChild(sidebar);
+  layout.appendChild(main);
+  root.appendChild(layout);
+
+  refresh();
 }
