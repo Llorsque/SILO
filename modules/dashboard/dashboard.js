@@ -21,20 +21,27 @@ export function mountDashboard(root){
   const columns = Object.keys(allRows[0] || {});
   const map = getMappingWithFallback(columns);
 
-  // Exacte Excel-kolommen als prioriteit
-  const pick = (preferred, fallback) => columns.includes(preferred) ? preferred : fallback;
+  const pick = (preferredList, fallback) => {
+    for(const name of preferredList){
+      if(columns.includes(name)) return name;
+      const ci = columns.find(c => String(c).trim().toLowerCase() === String(name).trim().toLowerCase());
+      if(ci) return ci;
+    }
+    return fallback;
+  };
 
   const col = {
-    rider:   pick("Naam",      map.rider),
-    ranking: pick("Ranking",   map.ranking),
-    nat:     pick("Nat.",      map.nat),
-    competition: pick("Wedstrijd", map.competition),
-    location:    pick("Locatie",   map.location),
-    distance:    pick("Afstand",   map.distance),
-    date:        pick("Datum",     map.date),
-    season:      pick("Seizoen",   map.season),
-    sex:         pick("Sekse",     map.sex),
-    winner:      pick("winnaar",   map.winner),
+    rider:   pick(["Naam"], map.rider),
+    ranking: pick(["Ranking","Pos. of Ranking"], map.ranking),
+    nat:     pick(["Nat."], map.nat),
+    competition: pick(["Wedstrijd"], map.competition),
+    location:    pick(["Locatie"], map.location),
+    distance:    pick(["Afstand"], map.distance),
+    date:        pick(["Datum"], map.date),
+    season:      pick(["Seizoen"], map.season),
+    sex:         pick(["Sekse"], map.sex),
+    winner:      pick(["winnaar"], map.winner),
+    race:        pick(["Race","Run of Race"], map.race),
   };
 
   const missing = Object.entries(col).filter(([_, v]) => !v || !columns.includes(v)).map(([k]) => k);
@@ -67,7 +74,6 @@ export function mountDashboard(root){
 
   const uniqSorted = (values) => uniq(values.map(norm).filter(Boolean)).sort((a,b)=>a.localeCompare(b,"nl"));
 
-  // Filter state: multi-select => Set. Leeg = "Alles"
   const state = {
     year: new Set(),
     competition: new Set(),
@@ -77,10 +83,9 @@ export function mountDashboard(root){
     season: new Set(),
     winner: new Set(),
     nat: new Set(),
-    rider: "ALL" // tiles-focus
+    rider: "ALL"
   };
 
-  // Options from column values
   const years = uniq(allRows.map(r => parseYear(r[col.date])).filter(y => y != null)).map(String).sort((a,b)=>a.localeCompare(b,"nl"));
   const competitions = uniqSorted(allRows.map(r => r[col.competition]));
   const locations    = uniqSorted(allRows.map(r => r[col.location]));
@@ -148,7 +153,6 @@ export function mountDashboard(root){
     kpiWrap.appendChild(tile(avg == null ? "—" : avg.toFixed(2), "Gem. ranking"));
   }
 
-  // Rider select (single) depends on filtered dataset
   const riderHost = el("div", {});
   function rebuildRiderSelect(filteredRows){
     clear(riderHost);
@@ -177,7 +181,6 @@ export function mountDashboard(root){
     renderKPIs(filtered);
   }
 
-  // Multi-select filters (left sidebar)
   const fYear = createSearchableMultiSelect({
     label:"Jaartal (Datum)",
     options: years.map(v => ({ value:v, label:v })),
@@ -256,14 +259,7 @@ export function mountDashboard(root){
     subtitle:"Multi-select • Leeg = alles",
     children:[
       el("div", { class:"filtersStack" }, [
-        fYear.el,
-        fComp.el,
-        fLoc.el,
-        fDist.el,
-        fSex.el,
-        fSeason.el,
-        fWinner.el,
-        fNat.el,
+        fYear.el, fComp.el, fLoc.el, fDist.el, fSex.el, fSeason.el, fWinner.el, fNat.el,
         el("div", { class:"row" }, [btnReset]),
       ])
     ]
@@ -272,7 +268,7 @@ export function mountDashboard(root){
 
   const main = sectionCard({
     title:"Dashboard",
-    subtitle:"Tiles zijn netjes uitgelijnd en volgen je filters.",
+    subtitle:"Tiles volgen je filters (bron: tabblad 'results').",
     children:[
       el("div", { class:"row" }, [infoPill]),
       el("div", { class:"hr" }),

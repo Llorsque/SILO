@@ -7,9 +7,9 @@ const MAP_KEY = "silo_mapping";
 let datasetCache = null;
 
 export const DEFAULT_MAPPING = {
-  rider: "Naam",
-  ranking: "Ranking",
   race: "Race",
+  ranking: "Ranking",
+  rider: "Naam",
   nat: "Nat.",
   note: "Opmerking",
   competition: "Wedstrijd",
@@ -21,14 +21,31 @@ export const DEFAULT_MAPPING = {
   winner: "winnaar",
 };
 
+const ALT_HEADERS = {
+  race: ["Run of Race"],
+  ranking: ["Pos. of Ranking"],
+};
+
+function findCI(columns, wanted){
+  const w = String(wanted).trim().toLowerCase();
+  return columns.find(c => String(c).trim().toLowerCase() === w) || null;
+}
+
+function openAltMatch(columns, key){
+  const alts = ALT_HEADERS[key] || [];
+  for(const a of alts){
+    const found = findCI(columns, a);
+    if(found) return found;
+  }
+  return null;
+}
+
 export async function initDataset(){
-  // Load once on app start so the rest of the app can stay synchronous.
   try{
     datasetCache = await idbGet(DATA_IDB_KEY);
   }catch{
     datasetCache = null;
   }
-  // If cache exists, ensure meta is present (best effort)
   if(Array.isArray(datasetCache)){
     const meta = loadMeta() || {};
     if(!meta.rowCount){
@@ -79,11 +96,18 @@ export function saveMapping(map){
 export function getMappingWithFallback(columns){
   const stored = loadMapping() || {};
   const map = { ...DEFAULT_MAPPING, ...stored };
+
   if(Array.isArray(columns) && columns.length){
     for(const k of Object.keys(map)){
       if(!columns.includes(map[k])){
-        const found = columns.find(c => c.toLowerCase() === String(map[k]).toLowerCase());
+        const found = findCI(columns, map[k]);
         if(found) map[k] = found;
+      }
+    }
+    for(const k of Object.keys(ALT_HEADERS)){
+      if(!columns.includes(map[k])){
+        const alt = openAltMatch(columns, k);
+        if(alt) map[k] = alt;
       }
     }
   }
