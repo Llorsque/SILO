@@ -5,14 +5,9 @@ import { toNumber } from "../../core/utils.js";
 
 /**
  * Kampioenen (exact op Excel-kolommen)
- *
- * Belangrijk: in de results-sheet staan ook heats/kwartfinales/halve finales.
- * Daar kan Ranking=1 voorkomen (heatwinnaar), maar dat is géén medaille.
- * Voor "kampioenen" nemen we daarom alleen de EINDUITSLAAG:
- *   - Race == 'Final A' (primair)
- *   - of Race == 'Final' (fallback, als 'Final A' niet gebruikt wordt)
- *
- * Vervolgens dedupliceren we naar 1 regel per (Type, Jaar, Sekse, Afstand, Medaille).
+ * - Filters blijven: WK/OS, Jaar, Sekse, Afstand, Medaille
+ * - Tabel output: Toernooi, Jaar, Afstand, Pos., Medaille(icoon), Rijder, Nat, Locatie, Datum
+ *   (Sekse en Race niet zichtbaar)
  */
 export function mountChampions(root){
   clear(root);
@@ -29,17 +24,16 @@ export function mountChampions(root){
 
   const cols = Object.keys(rows[0] || {});
   const map = getMappingWithFallback(cols);
-
   const pick = (preferred, fallback) => cols.includes(preferred) ? preferred : fallback;
 
   const col = {
-    race:        pick("Race",      map.race),        // A
-    competition: pick("Wedstrijd", map.competition), // F
-    season:      pick("Seizoen",   map.season),      // J
-    distance:    pick("Afstand",   map.distance),    // H
-    ranking:     pick("Ranking",   map.ranking),     // B
-    rider:       pick("Naam",      map.rider),       // C
-    sex:         pick("Sekse",     map.sex),         // K
+    race:        pick("Race",      map.race),
+    competition: pick("Wedstrijd", map.competition),
+    season:      pick("Seizoen",   map.season),
+    distance:    pick("Afstand",   map.distance),
+    ranking:     pick("Ranking",   map.ranking),
+    rider:       pick("Naam",      map.rider),
+    sex:         pick("Sekse",     map.sex),
     nat:         pick("Nat.",      map.nat),
     location:    pick("Locatie",   map.location),
     date:        pick("Datum",     map.date),
@@ -69,7 +63,6 @@ export function mountChampions(root){
     return null;
   }
 
-  // Excel serial -> Date (1900 system)
   function excelSerialToDate(serial){
     const n = Number(serial);
     if(!Number.isFinite(n)) return null;
@@ -145,18 +138,16 @@ export function mountChampions(root){
     if(s === "final") return 1;
     return 9;
   }
-  function isMedalRace(v){
-    return racePriority(v) <= 1;
-  }
+  function isMedalRace(v){ return racePriority(v) <= 1; }
 
   const ALL_YEARS = [2019,2020,2021,2022,2023,2024,2025,2026];
 
   const state = {
-    types: new Set(),        // WK/OS
-    years: new Set(),        // season/year
-    sexes: new Set(),        // man/vrouw lowercase
-    distances: new Set(),    // 500m/1000m/1500m
-    medals: new Set(),       // goud/zilver/brons
+    types: new Set(),
+    years: new Set(),
+    sexes: new Set(),
+    distances: new Set(),
+    medals: new Set(),
   };
 
   const pill = el("div", { class:"pill" }, "—");
@@ -167,7 +158,7 @@ export function mountChampions(root){
     function sync(){ b.classList.toggle("btn--primary", !!isActiveFn()); }
     b.addEventListener("click", () => { onToggle(); sync(); refresh(); });
     sync();
-    return { el:b, sync };
+    return { el:b };
   }
 
   function group(label, bodyEl){
@@ -186,16 +177,13 @@ export function mountChampions(root){
   function renderTypeButtons(){
     clear(gType);
     const row = el("div", { class:"row" });
-
     row.appendChild(toggleBtn("WK", () => state.types.has("WK"), () => {
       if(state.types.has("WK")) state.types.delete("WK"); else state.types.add("WK");
     }).el);
-
     row.appendChild(toggleBtn("OS", () => state.types.has("OS"), () => {
       if(state.types.has("OS")) state.types.delete("OS"); else state.types.add("OS");
     }).el);
-
-    gType.appendChild(group("Type (kolom F)", row));
+    gType.appendChild(group("Toernooi (kolom F)", row));
   }
 
   function availableYearsForTypes(typesSet){
@@ -203,10 +191,7 @@ export function mountChampions(root){
     rows.forEach(r => {
       const t = getTypeFromWedstrijd(r[col.competition]);
       if(!t || !typesSet.has(t)) return;
-
-      // only years that actually have medal races
       if(!isMedalRace(r[col.race])) return;
-
       const y = getSeasonValue(r[col.season]);
       if(y != null) years.add(y);
     });
@@ -219,59 +204,49 @@ export function mountChampions(root){
 
     const activeTypes = state.types.size ? state.types : new Set(["WK","OS"]);
     const available = availableYearsForTypes(activeTypes);
-
     const filterYearsByAvailability = state.types.size > 0;
 
     ALL_YEARS.forEach(y => {
       if(filterYearsByAvailability && !available.has(y)) return;
-
       row.appendChild(toggleBtn(String(y), () => state.years.has(y), () => {
         if(state.years.has(y)) state.years.delete(y); else state.years.add(y);
       }).el);
     });
 
-    gYear.appendChild(group("Jaar/Seizoen (kolom J)", row));
+    gYear.appendChild(group("Jaar (kolom J)", row));
   }
 
   function renderSexButtons(){
     clear(gSex);
     const row = el("div", { class:"row" });
-
     row.appendChild(toggleBtn("Man", () => state.sexes.has("man"), () => {
       if(state.sexes.has("man")) state.sexes.delete("man"); else state.sexes.add("man");
     }).el);
-
     row.appendChild(toggleBtn("Vrouw", () => state.sexes.has("vrouw"), () => {
       if(state.sexes.has("vrouw")) state.sexes.delete("vrouw"); else state.sexes.add("vrouw");
     }).el);
-
     gSex.appendChild(group("Sekse (kolom K)", row));
   }
 
   function renderDistanceButtons(){
     clear(gDist);
     const row = el("div", { class:"row" });
-
     ["500m","1000m","1500m"].forEach(d => {
       row.appendChild(toggleBtn(d, () => state.distances.has(d), () => {
         if(state.distances.has(d)) state.distances.delete(d); else state.distances.add(d);
       }).el);
     });
-
     gDist.appendChild(group("Afstand (kolom H)", row));
   }
 
   function renderMedalButtons(){
     clear(gMedal);
     const row = el("div", { class:"row" });
-
-    ["goud","zilver","brons"].forEach(m => {
-      const label = m.charAt(0).toUpperCase() + m.slice(1);
-      row.appendChild(toggleBtn(label, () => state.medals.has(m), () => {
+    [["goud","🥇"],["zilver","🥈"],["brons","🥉"]].forEach(([m, icon]) => {
+      row.appendChild(toggleBtn(`${icon} ${m.charAt(0).toUpperCase()+m.slice(1)}`, () => state.medals.has(m), () => {
         if(state.medals.has(m)) state.medals.delete(m); else state.medals.add(m);
       }).el);
     });
-
     gMedal.appendChild(group("Medailles (kolom B)", row));
   }
 
@@ -280,7 +255,6 @@ export function mountChampions(root){
     const medals = state.medals.size ? state.medals : new Set(["goud","zilver","brons"]);
 
     return rows.filter(r => {
-      // only medal race rows
       if(!isMedalRace(r[col.race])) return false;
 
       const t = getTypeFromWedstrijd(r[col.competition]);
@@ -303,36 +277,37 @@ export function mountChampions(root){
   }
 
   function dedupeToUniqueMedals(list){
-    // Keep 1 row per (type, year, sex, distance, medal)
     const bestByKey = new Map();
 
     function keyOf(r){
       const t = getTypeFromWedstrijd(r[col.competition]) || "";
       const y = getSeasonValue(r[col.season]) ?? "";
-      const sx = getSexValue(r[col.sex]) || "";
       const dist = getDistanceKey(r[col.distance]) || "";
+      const sx = getSexValue(r[col.sex]) || "";
       const medal = getMedalFromRanking(r[col.ranking]) || "";
-      return `${t}__${y}__${sx}__${dist}__${medal}`;
+      return `${t}__${y}__${dist}__${sx}__${medal}`;
     }
 
     function score(r){
-      // lower is better
       const rp = racePriority(r[col.race]);
       const rank = toNumber(r[col.ranking]) ?? 99;
-      return rp * 100 + rank; // Final A wins over Final
+      return rp * 100 + rank;
     }
 
     list.forEach(r => {
       const k = keyOf(r);
       const cur = bestByKey.get(k);
-      if(!cur){
-        bestByKey.set(k, r);
-        return;
-      }
-      if(score(r) < score(cur)) bestByKey.set(k, r);
+      if(!cur || score(r) < score(cur)) bestByKey.set(k, r);
     });
 
     return Array.from(bestByKey.values());
+  }
+
+  function medalIcon(m){
+    if(m === "goud") return "🥇";
+    if(m === "zilver") return "🥈";
+    if(m === "brons") return "🥉";
+    return "•";
   }
 
   function renderTable(list){
@@ -359,61 +334,59 @@ export function mountChampions(root){
       const db = getDistanceKey(b[col.distance]) || "";
       if(da !== db) return (distOrder[da]||9) - (distOrder[db]||9);
 
-      const sa = getSexValue(a[col.sex]) || "";
-      const sb = getSexValue(b[col.sex]) || "";
-      if(sa !== sb) return sa.localeCompare(sb, "nl");
-
       const ma = getMedalFromRanking(a[col.ranking]) || "";
       const mb = getMedalFromRanking(b[col.ranking]) || "";
       return (medalOrder[ma]||9) - (medalOrder[mb]||9);
     });
 
     const items = sorted.map(r => {
-      const type = getTypeFromWedstrijd(r[col.competition]) || "";
-      const season = getSeasonValue(r[col.season]) ?? "";
-      const sex = getSexValue(r[col.sex]) || "";
+      const tournament = getTypeFromWedstrijd(r[col.competition]) || "";
+      const year = getSeasonValue(r[col.season]) ?? "";
       const dist = getDistanceKey(r[col.distance]) || norm(r[col.distance]);
       const medal = getMedalFromRanking(r[col.ranking]) || "";
+      const pos = norm(r[col.ranking]);
       const rider = norm(r[col.rider]);
       const nat = norm(r[col.nat]);
       const loc = norm(r[col.location]);
-      const rawDate = r[col.date];
 
-      // Better date display if Excel serial
+      const rawDate = r[col.date];
       let date = norm(rawDate);
       if(typeof rawDate === "number" && rawDate >= 20000 && rawDate <= 60000){
         date = excelSerialToISO(rawDate) || date;
       }
 
-      const rank = norm(r[col.ranking]);
-      const race = norm(r[col.race]);
-
-      return { type, season, sex, dist, medal, rank, rider, nat, loc, date, race };
+      return { tournament, year, dist, pos, medal, rider, nat, loc, date };
     });
 
-    out.appendChild(el("table", { class:"table" }, [
-      el("thead", {}, el("tr", {}, ["Type","Jaar","Sekse","Afstand","Medaille","Pos.","Rijder","Nat.","Locatie","Datum","Race"].map(h => el("th", {}, h)))),
+    out.appendChild(el("table", { class:"table championsTable" }, [
+      el("thead", {}, el("tr", {}, [
+        el("th", {}, "Toernooi"),
+        el("th", {}, "Jaar"),
+        el("th", {}, "Afstand"),
+        el("th", {}, "Pos."),
+        el("th", { class:"championsTable__medalTh" }, "Medaille"),
+        el("th", {}, "Rijder"),
+        el("th", {}, "Nat"),
+        el("th", {}, "Locatie"),
+        el("th", {}, "Datum"),
+      ])),
       el("tbody", {}, items.map(it => el("tr", {}, [
-        el("td", {}, it.type),
-        el("td", {}, String(it.season)),
-        el("td", {}, it.sex),
+        el("td", {}, it.tournament),
+        el("td", {}, String(it.year)),
         el("td", {}, it.dist),
-        el("td", {}, it.medal),
-        el("td", {}, it.rank),
+        el("td", {}, it.pos),
+        el("td", { class:"championsTable__medalTd" }, el("span", { class:"medalIcon", title: it.medal }, medalIcon(it.medal))),
         el("td", {}, it.rider),
         el("td", {}, it.nat),
         el("td", {}, it.loc),
         el("td", {}, it.date),
-        el("td", {}, it.race),
       ])))
     ]));
   }
 
   function refresh(){
     renderYearButtons();
-    const filteredRaw = applyFiltersRaw();
-    const filtered = dedupeToUniqueMedals(filteredRaw);
-
+    const filtered = dedupeToUniqueMedals(applyFiltersRaw());
     pill.textContent = `${filtered.length.toLocaleString("nl-NL")} resultaten`;
     renderTable(filtered);
   }
@@ -438,7 +411,7 @@ export function mountChampions(root){
 
   const card = sectionCard({
     title:"Kampioenen",
-    subtitle:"We tonen alleen einduitslagen (Final A/Final) en 1 unieke medaille per categorie.",
+    subtitle:"Toont einduitslagen (Final A/Final) en 1 unieke medaille per categorie.",
     children:[
       el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnReset]),
       el("div", { class:"hr" }),
