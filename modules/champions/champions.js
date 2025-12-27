@@ -6,6 +6,7 @@ import { toNumber } from "../../core/utils.js";
 /**
  * Kampioenen (exact op Excel-kolommen)
  * - Filters: WK/OS, Jaar, Sekse, Afstand, Medaille
+ * - Filters worden compact naast elkaar getoond (met | tussen groepen)
  * - Tabel output: Toernooi, Jaar, Afstand, Pos., Medaille(icoon), Rijder, Nat, Locatie, Datum
  * - Compact: geselecteerde filters worden boven de tabel getoond als titel
  *   bijv. "Olympische Spelen 2022 - 500m mannen"
@@ -163,7 +164,7 @@ export function mountChampions(root){
   }
 
   function group(label, bodyEl){
-    return el("div", {}, [
+    return el("div", { style:"min-width: 140px;" }, [
       el("div", { class:"muted", style:"font-size:12px; margin:0 0 6px 2px; font-weight:800" }, label),
       bodyEl
     ]);
@@ -177,14 +178,14 @@ export function mountChampions(root){
 
   function renderTypeButtons(){
     clear(gType);
-    const row = el("div", { class:"row" });
+    const row = el("div", { class:"row", style:"gap:10px;" });
     row.appendChild(toggleBtn("WK", () => state.types.has("WK"), () => {
       if(state.types.has("WK")) state.types.delete("WK"); else state.types.add("WK");
     }).el);
     row.appendChild(toggleBtn("OS", () => state.types.has("OS"), () => {
       if(state.types.has("OS")) state.types.delete("OS"); else state.types.add("OS");
     }).el);
-    gType.appendChild(group("Toernooi (kolom F)", row));
+    gType.appendChild(group("Toernooi", row));
   }
 
   function availableYearsForTypes(typesSet){
@@ -201,7 +202,7 @@ export function mountChampions(root){
 
   function renderYearButtons(){
     clear(gYear);
-    const row = el("div", { class:"row" });
+    const row = el("div", { class:"row", style:"gap:10px;" });
 
     const activeTypes = state.types.size ? state.types : new Set(["WK","OS"]);
     const available = availableYearsForTypes(activeTypes);
@@ -214,41 +215,41 @@ export function mountChampions(root){
       }).el);
     });
 
-    gYear.appendChild(group("Jaar (kolom J)", row));
+    gYear.appendChild(group("Jaar", row));
   }
 
   function renderSexButtons(){
     clear(gSex);
-    const row = el("div", { class:"row" });
+    const row = el("div", { class:"row", style:"gap:10px;" });
     row.appendChild(toggleBtn("Man", () => state.sexes.has("man"), () => {
       if(state.sexes.has("man")) state.sexes.delete("man"); else state.sexes.add("man");
     }).el);
     row.appendChild(toggleBtn("Vrouw", () => state.sexes.has("vrouw"), () => {
       if(state.sexes.has("vrouw")) state.sexes.delete("vrouw"); else state.sexes.add("vrouw");
     }).el);
-    gSex.appendChild(group("Sekse (kolom K)", row));
+    gSex.appendChild(group("Sekse", row));
   }
 
   function renderDistanceButtons(){
     clear(gDist);
-    const row = el("div", { class:"row" });
+    const row = el("div", { class:"row", style:"gap:10px;" });
     ["500m","1000m","1500m"].forEach(d => {
       row.appendChild(toggleBtn(d, () => state.distances.has(d), () => {
         if(state.distances.has(d)) state.distances.delete(d); else state.distances.add(d);
       }).el);
     });
-    gDist.appendChild(group("Afstand (kolom H)", row));
+    gDist.appendChild(group("Afstand", row));
   }
 
   function renderMedalButtons(){
     clear(gMedal);
-    const row = el("div", { class:"row" });
+    const row = el("div", { class:"row", style:"gap:10px;" });
     [["goud","🥇"],["zilver","🥈"],["brons","🥉"]].forEach(([m, icon]) => {
       row.appendChild(toggleBtn(`${icon} ${m.charAt(0).toUpperCase()+m.slice(1)}`, () => state.medals.has(m), () => {
         if(state.medals.has(m)) state.medals.delete(m); else state.medals.add(m);
       }).el);
     });
-    gMedal.appendChild(group("Medailles (kolom B)", row));
+    gMedal.appendChild(group("Medailles", row));
   }
 
   function applyFiltersRaw(){
@@ -322,7 +323,6 @@ export function mountChampions(root){
     if(state.years.size === 1) return String(Array.from(state.years)[0]);
     if(state.years.size > 1){
       const arr = Array.from(state.years).slice().sort((a,b)=>a-b);
-      // compact range if contiguous
       const contiguous = arr.every((v,i)=> i===0 || v === arr[i-1]+1);
       if(contiguous) return `${arr[0]}–${arr[arr.length-1]}`;
       return arr.join(", ");
@@ -351,27 +351,23 @@ export function mountChampions(root){
     const d = distanceLabel();
     const s = sexLabel();
 
-    // Build: "Olympische Spelen 2022 - 500m mannen"
     let left = t;
     if(y) left = `${left} ${y}`;
 
-    let rightParts = [];
+    const rightParts = [];
     if(d) rightParts.push(d);
     if(s) rightParts.push(s);
 
-    if(rightParts.length){
-      return `${left} - ${rightParts.join(" ")}`;
-    }
+    if(rightParts.length) return `${left} - ${rightParts.join(" ")}`;
     return left;
   }
 
   function renderTable(list){
     clear(out);
 
-    const title = selectionTitle();
     out.appendChild(el("div", {
       style: "font-weight:900; font-size:14px; margin: 0 0 10px; opacity: .95;"
-    }, title));
+    }, selectionTitle()));
 
     if(list.length === 0){
       out.appendChild(el("div", { class:"notice" }, "Geen resultaten met deze selectie."));
@@ -466,6 +462,17 @@ export function mountChampions(root){
   renderDistanceButtons();
   renderMedalButtons();
 
+  const divider = () => el("div", { class:"muted", style:"opacity:.55; align-self:center; padding: 0 2px;" }, "|");
+  const filtersInline = el("div", {
+    style:"display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; padding: 2px 0 6px;"
+  }, [
+    gType, divider(),
+    gYear, divider(),
+    gSex, divider(),
+    gDist, divider(),
+    gMedal
+  ]);
+
   const btnReset = el("button", { class:"btn", type:"button" }, "Reset");
   btnReset.addEventListener("click", reset);
 
@@ -475,15 +482,7 @@ export function mountChampions(root){
     children:[
       el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnReset]),
       el("div", { class:"hr" }),
-      gType,
-      el("div", { style:"height:10px" }),
-      gYear,
-      el("div", { style:"height:10px" }),
-      gSex,
-      el("div", { style:"height:10px" }),
-      gDist,
-      el("div", { style:"height:10px" }),
-      gMedal,
+      filtersInline,
       el("div", { class:"hr" }),
       out
     ]
