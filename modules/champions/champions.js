@@ -1,15 +1,19 @@
 import { el, clear } from "../../core/dom.js";
 import { sectionCard } from "../../core/layout.js";
 import { loadDataset, getMappingWithFallback } from "../../core/storage.js";
-import { safeLower, toNumber, uniq } from "../../core/utils.js";
+import { toNumber } from "../../core/utils.js";
 
 /**
- * Kampioenen module (WK/OS) - filters als toggle buttons:
- * - WK / OS (selecteer/deselecteer)
- * - Jaar 2019-2026 (selecteer/deselecteer) — als OS geselecteerd: alleen jaren met OS-data zichtbaar
- * - Man / Vrouw (selecteer/deselecteer, case-insensitive)
- * - Afstanden 500m / 1000m / 1500m (selecteer/deselecteer)
- * - Medailles: Goud/Zilver/Brons (selecteer/deselecteer)
+ * Kampioenen (exact op Excel-kolommen)
+ * - Type (WK/OS) gebaseerd op kolom F: 'Wedstrijd'
+ *    - OS: bevat 'Olympische Spelen'
+ *    - WK: bevat 'Wereldkampioenschap'
+ * - Jaar/Seizoen gebaseerd op kolom J: 'Seizoen' (2019-2026 knoppen)
+ *   Let op: Excel kan datums als seriële getallen opslaan (bv. 44608). We converteren dit naar jaartal.
+ * - Afstand gebaseerd op kolom H: 'Afstand' (500m/1000m/1500m)
+ * - Uitslag/medaille gebaseerd op kolom B: 'Ranking' (1 goud, 2 zilver, 3 brons)
+ * - Rijdernaam gebaseerd op kolom C: 'Naam'
+ * - Sekse gebaseerd op kolom K: 'Sekse' (Man/Vrouw, case-insensitive)
  */
 export function mountChampions(root){
   clear(root);
@@ -27,46 +31,88 @@ export function mountChampions(root){
   const cols = Object.keys(rows[0] || {});
   const map = getMappingWithFallback(cols);
 
-  // Prefer exact headers if present
   const pick = (preferred, fallback) => cols.includes(preferred) ? preferred : fallback;
 
   const col = {
-    competition: pick("Wedstrijd", map.competition),
-    date:        pick("Datum", map.date),
-    season:      pick("Seizoen", map.season),
-    sex:         pick("Sekse", map.sex),
-    distance:    pick("Afstand", map.distance),
-    ranking:     pick("Ranking", map.ranking),
-    winner:      pick("winnaar", map.winner),
-    rider:       pick("Naam", map.rider),
-    nat:         pick("Nat.", map.nat),
-    location:    pick("Locatie", map.location),
+    competition: pick("Wedstrijd", map.competition), // F
+    season:      pick("Seizoen",   map.season),      // J (jaar/seizoen)
+    distance:    pick("Afstand",   map.distance),    // H
+    ranking:     pick("Ranking",   map.ranking),     // B
+    rider:       pick("Naam",      map.rider),       // C
+    sex:         pick("Sekse",     map.sex),         // K
+    nat:         pick("Nat.",      map.nat),
+    location:    pick("Locatie",   map.location),
+    date:        pick("Datum",     map.date),
   };
 
-  // Small helpers
+  const missing = Object.entries(col).filter(([_, v]) => !v || !cols.includes(v)).map(([k]) => k);
+  if(missing.length){
+    root.appendChild(sectionCard({
+      title:"Kampioenen",
+      subtitle:"Kolommen ontbreken of zijn niet herkend.",
+      children:[
+        el("div", { class:"notice" },
+          "Ik kan deze kolommen niet vinden: " + missing.join(", ") +
+          ". Controleer de kolomkoppen of stel mapping in via het tandwiel.")
+      ]
+    }));
+    return;
+  }
+
   const norm = (v) => String(v ?? "").trim();
   const lower = (v) => norm(v).toLowerCase();
 
-  function parseYear(v){
-    const s = norm(v);
-    if(!s) return null;
-    // dd-mm-yyyy or dd/mm/yyyy
-    const m = s.match(/^(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{4})$/);
-    if(m) return Number(m[3]);
-    // yyyy-mm-dd
-    const m2 = s.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})$/);
-    if(m2) return Number(m2[1]);
-    const d = new Date(s);
-    if(!Number.isNaN(d.getTime())) return d.getFullYear();
+  function getTypeFromWedstrijd(v){
+    const s = lower(v);
+    if(s.includes("olympische spelen")) return "OS";
+    if(s.includes("wereldkampioenschap")) return "WK";
     return null;
   }
 
-  function getTypeFromCompetition(v){
-    const s = safeLower(v);
-    // Olympic / OS
-    if(s.includes("olymp") || s.includes("olympic") || s.includes(" os ") || s.startsWith("os ") || s.endsWith(" os")) return "OS";
-    // World Champs / WK
-    if((s.includes("world") && s.includes("champ")) || s.includes("wk") || s.includes("world championships") || s.includes("world championship")) return "WK";
+  // Excel date serial conversion (1900 date system, with Excel's 1900 leap-year bug handled by using 1899-12-30 base)
+  function excelSerialToYear(serial){
+    const n = Number(serial);
+    if(!Number.isFinite(n)) return null;
+    const base = new Date(Date.UTC(1899, 11, 30)); // 1899-12-30
+    const ms = base.getTime() + n * 86400000;
+    const d = new Date(ms);
+    return d.getUTCFullYear();
+  }
+
+  function getSeasonValue(v){
+    if(v == null || v === "") return null;
+
+    // If already a Date object (depends on XLSX settings)
+    if(v instanceof Date && !Number.isNaN(v.getTime())){
+      return v.getFullYear();
+    }
+
+    // If it's a number:
+    // - normal seasons are 2019..2026
+    // - Excel date serials are typically 40k+ (e.g., 44608)
+    if(typeof v === "number"){
+      if(v >= 1900 && v <= 2100) return v;            // plain year
+      if(v >= 20000 && v <= 60000) return excelSerialToYear(v); // Excel serial date -> year
+      // fallback: try digits
+      const n = Number(String(v).replace(/[^0-9]/g,""));
+      return Number.isFinite(n) ? n : null;
+    }
+
+    // If string: extract digits
+    const s = norm(v);
+    // If the string looks like a date, try Date parse first
+    const d = new Date(s);
+    if(!Number.isNaN(d.getTime())){
+      const y = d.getFullYear();
+      // guard for weird parses (like '2020' parsed as 2020-01-01)
+      if(y >= 1900 && y <= 2100) return y;
+    }
+
+    const n = Number(s.replace(/[^0-9]/g,""));
+    if(Number.isFinite(n)){
+      if(n >= 1900 && n <= 2100) return n;
+      if(n >= 20000 && n <= 60000) return excelSerialToYear(n);
+    }
     return null;
   }
 
@@ -74,7 +120,7 @@ export function mountChampions(root){
     const s = lower(v);
     if(s.includes("vrouw")) return "vrouw";
     if(s.includes("man")) return "man";
-    return s; // fallback
+    return s;
   }
 
   function getDistanceKey(v){
@@ -85,8 +131,8 @@ export function mountChampions(root){
     return null;
   }
 
-  function getMedalFromRank(rank){
-    const r = toNumber(rank);
+  function getMedalFromRanking(v){
+    const r = toNumber(v);
     if(r === 1) return "goud";
     if(r === 2) return "zilver";
     if(r === 3) return "brons";
@@ -95,41 +141,24 @@ export function mountChampions(root){
 
   const ALL_YEARS = [2019,2020,2021,2022,2023,2024,2025,2026];
 
-  // Filter state (multi toggles)
   const state = {
-    types: new Set(),        // "WK" | "OS" ; empty => both
-    years: new Set(),        // numbers; empty => all
-    sexes: new Set(),        // "man" | "vrouw" ; empty => all
-    distances: new Set(),    // "500m"|"1000m"|"1500m" ; empty => all
-    medals: new Set(),       // "goud"|"zilver"|"brons" ; empty => all (1/2/3)
+    types: new Set(),        // WK/OS
+    years: new Set(),        // season/year
+    sexes: new Set(),        // man/vrouw lowercase
+    distances: new Set(),    // 500m/1000m/1500m
+    medals: new Set(),       // goud/zilver/brons
   };
 
-  // UI
-  const out = el("div", {});
   const pill = el("div", { class:"pill" }, "—");
+  const out = el("div", {});
 
-  // Button factory (toggle)
   function toggleBtn(label, isActiveFn, onToggle){
-    const b = el("button", {
-      class: "btn",
-      type:"button",
-      style:"padding:8px 10px; border-radius:14px; font-weight:800;"
-    }, label);
-
-    function sync(){
-      b.classList.toggle("btn--primary", !!isActiveFn());
-    }
+    const b = el("button", { class:"btn", type:"button", style:"padding:8px 10px; border-radius:14px; font-weight:800;" }, label);
+    function sync(){ b.classList.toggle("btn--primary", !!isActiveFn()); }
     b.addEventListener("click", () => { onToggle(); sync(); refresh(); });
     sync();
-    return { el: b, sync };
+    return { el:b, sync };
   }
-
-  // Groups (containers)
-  const gType = el("div", {});
-  const gYear = el("div", {});
-  const gSex = el("div", {});
-  const gDist = el("div", {});
-  const gMedal = el("div", {});
 
   function group(label, bodyEl){
     return el("div", {}, [
@@ -138,48 +167,52 @@ export function mountChampions(root){
     ]);
   }
 
+  const gType = el("div", {});
+  const gYear = el("div", {});
+  const gSex = el("div", {});
+  const gDist = el("div", {});
+  const gMedal = el("div", {});
+
   function renderTypeButtons(){
     clear(gType);
     const row = el("div", { class:"row" });
+
     const wk = toggleBtn("WK", () => state.types.has("WK"), () => {
       if(state.types.has("WK")) state.types.delete("WK"); else state.types.add("WK");
     });
     const os = toggleBtn("OS", () => state.types.has("OS"), () => {
       if(state.types.has("OS")) state.types.delete("OS"); else state.types.add("OS");
     });
+
     row.appendChild(wk.el);
     row.appendChild(os.el);
-    gType.appendChild(group("Type", row));
+
+    gType.appendChild(group("Type (kolom F)", row));
   }
 
-  function computeAvailableYearsForCurrentTypeSelection(){
-    // If no type selected => treat both
-    const types = state.types.size ? state.types : new Set(["WK","OS"]);
+  function availableYearsForTypes(typesSet){
     const years = new Set();
     rows.forEach(r => {
-      const t = getTypeFromCompetition(r[col.competition]);
-      if(!t || !types.has(t)) return;
-      const y = parseYear(r[col.date]);
+      const t = getTypeFromWedstrijd(r[col.competition]);
+      if(!t || !typesSet.has(t)) return;
+      const y = getSeasonValue(r[col.season]);
       if(y != null) years.add(y);
     });
     return years;
-  }
-
-  // Rule: if OS selected, only show years where data is known (visible)
-  function shouldUseAvailableYearsOnly(){
-    return state.types.has("OS"); // as requested
   }
 
   function renderYearButtons(){
     clear(gYear);
     const row = el("div", { class:"row" });
 
-    const available = computeAvailableYearsForCurrentTypeSelection();
-    const useAvailableOnly = shouldUseAvailableYearsOnly();
+    const activeTypes = state.types.size ? state.types : new Set(["WK","OS"]);
+    const available = availableYearsForTypes(activeTypes);
+
+    // If user explicitly selects types (OS only, WK only, or both) => only show years that exist for those types
+    const filterYearsByAvailability = state.types.size > 0;
 
     ALL_YEARS.forEach(y => {
-      const visible = !useAvailableOnly || available.has(y);
-      if(!visible) return;
+      if(filterYearsByAvailability && !available.has(y)) return;
 
       const btn = toggleBtn(String(y), () => state.years.has(y), () => {
         if(state.years.has(y)) state.years.delete(y); else state.years.add(y);
@@ -187,7 +220,7 @@ export function mountChampions(root){
       row.appendChild(btn.el);
     });
 
-    gYear.appendChild(group("Jaar", row));
+    gYear.appendChild(group("Jaar/Seizoen (kolom J)", row));
   }
 
   function renderSexButtons(){
@@ -203,7 +236,8 @@ export function mountChampions(root){
 
     row.appendChild(man.el);
     row.appendChild(vrouw.el);
-    gSex.appendChild(group("Sekse", row));
+
+    gSex.appendChild(group("Sekse (kolom K)", row));
   }
 
   function renderDistanceButtons(){
@@ -224,7 +258,7 @@ export function mountChampions(root){
     row.appendChild(d1000.el);
     row.appendChild(d1500.el);
 
-    gDist.appendChild(group("Afstand", row));
+    gDist.appendChild(group("Afstand (kolom H)", row));
   }
 
   function renderMedalButtons(){
@@ -245,7 +279,7 @@ export function mountChampions(root){
     row.appendChild(z.el);
     row.appendChild(b.el);
 
-    gMedal.appendChild(group("Medailles", row));
+    gMedal.appendChild(group("Medailles (kolom B)", row));
   }
 
   function applyFilters(){
@@ -253,10 +287,10 @@ export function mountChampions(root){
     const medals = state.medals.size ? state.medals : new Set(["goud","zilver","brons"]);
 
     return rows.filter(r => {
-      const t = getTypeFromCompetition(r[col.competition]);
+      const t = getTypeFromWedstrijd(r[col.competition]);
       if(!t || !types.has(t)) return false;
 
-      const y = parseYear(r[col.date]);
+      const y = getSeasonValue(r[col.season]);
       if(state.years.size && !state.years.has(y)) return false;
 
       const sx = getSexValue(r[col.sex]);
@@ -265,7 +299,7 @@ export function mountChampions(root){
       const dist = getDistanceKey(r[col.distance]);
       if(state.distances.size && !state.distances.has(dist)) return false;
 
-      const medal = getMedalFromRank(r[col.ranking]);
+      const medal = getMedalFromRanking(r[col.ranking]);
       if(!medal || !medals.has(medal)) return false;
 
       return true;
@@ -280,49 +314,52 @@ export function mountChampions(root){
       return;
     }
 
-    // Sort: type, year desc, distance, sex, medal
-    const orderMedal = { goud:1, zilver:2, brons:3 };
+    const medalOrder = { goud:1, zilver:2, brons:3 };
+    const distOrder = { "500m":1, "1000m":2, "1500m":3 };
+
     const sorted = list.slice().sort((a,b) => {
-      const ta = getTypeFromCompetition(a[col.competition]) || "";
-      const tb = getTypeFromCompetition(b[col.competition]) || "";
+      const ta = getTypeFromWedstrijd(a[col.competition]) || "";
+      const tb = getTypeFromWedstrijd(b[col.competition]) || "";
       if(ta !== tb) return ta.localeCompare(tb, "nl");
-      const ya = parseYear(a[col.date]) || 0;
-      const yb = parseYear(b[col.date]) || 0;
+      const ya = getSeasonValue(a[col.season]) || 0;
+      const yb = getSeasonValue(b[col.season]) || 0;
       if(ya !== yb) return yb - ya;
       const da = getDistanceKey(a[col.distance]) || "";
       const db = getDistanceKey(b[col.distance]) || "";
-      if(da !== db) return da.localeCompare(db, "nl");
+      if(da !== db) return (distOrder[da]||9) - (distOrder[db]||9);
       const sa = getSexValue(a[col.sex]) || "";
       const sb = getSexValue(b[col.sex]) || "";
       if(sa !== sb) return sa.localeCompare(sb, "nl");
-      const ma = getMedalFromRank(a[col.ranking]) || "";
-      const mb = getMedalFromRank(b[col.ranking]) || "";
-      return (orderMedal[ma]||9) - (orderMedal[mb]||9);
+      const ma = getMedalFromRanking(a[col.ranking]) || "";
+      const mb = getMedalFromRanking(b[col.ranking]) || "";
+      return (medalOrder[ma]||9) - (medalOrder[mb]||9);
     });
 
-    const items = sorted.slice(0, 500).map(r => {
-      const type = getTypeFromCompetition(r[col.competition]) || "";
-      const year = parseYear(r[col.date]) || "";
-      const medal = getMedalFromRank(r[col.ranking]) || "";
-      const dist = getDistanceKey(r[col.distance]) || norm(r[col.distance]);
+    const items = sorted.slice(0, 800).map(r => {
+      const type = getTypeFromWedstrijd(r[col.competition]) || "";
+      const season = getSeasonValue(r[col.season]) ?? "";
       const sex = getSexValue(r[col.sex]) || "";
-      const name = norm(r[col.winner]) || norm(r[col.rider]);
+      const dist = getDistanceKey(r[col.distance]) || norm(r[col.distance]);
+      const medal = getMedalFromRanking(r[col.ranking]) || "";
+      const rider = norm(r[col.rider]);
       const nat = norm(r[col.nat]);
       const loc = norm(r[col.location]);
       const date = norm(r[col.date]);
+      const rank = norm(r[col.ranking]);
 
-      return { type, year, sex, dist, medal, name, nat, loc, date };
+      return { type, season, sex, dist, medal, rank, rider, nat, loc, date };
     });
 
     out.appendChild(el("table", { class:"table" }, [
-      el("thead", {}, el("tr", {}, ["Type","Jaar","Sekse","Afstand","Medaille","Rijder","Nat.","Locatie","Datum"].map(h => el("th", {}, h)))),
+      el("thead", {}, el("tr", {}, ["Type","Jaar","Sekse","Afstand","Medaille","Pos.","Rijder","Nat.","Locatie","Datum"].map(h => el("th", {}, h)))),
       el("tbody", {}, items.map(it => el("tr", {}, [
         el("td", {}, it.type),
-        el("td", {}, String(it.year)),
+        el("td", {}, String(it.season)),
         el("td", {}, it.sex),
         el("td", {}, it.dist),
         el("td", {}, it.medal),
-        el("td", {}, it.name),
+        el("td", {}, it.rank),
+        el("td", {}, it.rider),
         el("td", {}, it.nat),
         el("td", {}, it.loc),
         el("td", {}, it.date),
@@ -331,17 +368,9 @@ export function mountChampions(root){
   }
 
   function refresh(){
-    // Year visibility can change when OS is toggled
     renderYearButtons();
-
     const filtered = applyFilters();
     pill.textContent = `${filtered.length.toLocaleString("nl-NL")} resultaten`;
-
-    // Helpful hint if no WK/OS matches in data
-    if((state.types.size ? state.types : new Set(["WK","OS"])).size && filtered.length === 0){
-      // Do not override table message; handled in renderTable
-    }
-
     renderTable(filtered);
   }
 
@@ -354,7 +383,7 @@ export function mountChampions(root){
     mountChampions(root);
   }
 
-  // Initial render of filter groups
+  // Render
   renderTypeButtons();
   renderYearButtons();
   renderSexButtons();
@@ -364,9 +393,9 @@ export function mountChampions(root){
   const btnReset = el("button", { class:"btn", type:"button" }, "Reset");
   btnReset.addEventListener("click", reset);
 
-  const filtersCard = sectionCard({
+  const card = sectionCard({
     title:"Kampioenen",
-    subtitle:"Selecteer WK/OS, jaren, sekse, afstanden en medailles.",
+    subtitle:"Excel-datums in 'Seizoen' worden automatisch omgezet naar jaartal.",
     children:[
       el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnReset]),
       el("div", { class:"hr" }),
@@ -384,6 +413,6 @@ export function mountChampions(root){
     ]
   });
 
-  root.appendChild(filtersCard);
+  root.appendChild(card);
   refresh();
 }
