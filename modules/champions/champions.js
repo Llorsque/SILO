@@ -13,7 +13,9 @@ import { createSearchableSelect } from "../../core/components/searchableSelect.j
  *   bijv. "Olympische Spelen 2022 - 500m | mannen | HWANG Daeheon"
  *
  * Jaar-knoppen:
- * - Voor Olympische Spelen: alle jaren vanaf 1992 (ook als er nog geen data is ingeladen).
+ * - Voor Olympische Spelen: alleen de officiële OS-jaren (shorttrack): 1992, 1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022
+ * - Voor WK: 2019..2026 (zoals eerder)
+ * - Voor WK+OS samen: combinatie van beide sets.
  */
 export function mountChampions(root){
   clear(root);
@@ -148,8 +150,8 @@ export function mountChampions(root){
 
   // Jaar knoppen:
   const DEFAULT_YEAR_START = 2019;
-  const OS_YEAR_START = 1992;
   const YEAR_END = 2026;
+  const OLYMPIC_YEARS = [1992, 1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022];
 
   const state = {
     types: new Set(),
@@ -214,10 +216,24 @@ export function mountChampions(root){
   }
 
   function yearButtonsRange(){
-    const start = state.types.has("OS") ? OS_YEAR_START : DEFAULT_YEAR_START;
-    const years = [];
-    for(let y = start; y <= YEAR_END; y++) years.push(y);
-    return years;
+    const hasWK = state.types.has("WK");
+    const hasOS = state.types.has("OS");
+
+    const years = new Set();
+
+    // If OS selected, include the official Olympic years list
+    if(hasOS){
+      OLYMPIC_YEARS.forEach(y => years.add(y));
+    }
+
+    // If WK selected (or no selection yet), include default range
+    // (no selection => show WK+OS default, but we keep legacy: 2019..2026)
+    const includeWKRange = hasWK || state.types.size === 0;
+    if(includeWKRange){
+      for(let y = DEFAULT_YEAR_START; y <= YEAR_END; y++) years.add(y);
+    }
+
+    return Array.from(years).sort((a,b)=>a-b);
   }
 
   function renderYearButtons(){
@@ -312,7 +328,7 @@ export function mountChampions(root){
       const dist = getDistanceKey(r[col.distance]) || "";
       const sx = getSexValue(r[col.sex]) || "";
       const medal = getMedalFromRanking(r[col.ranking]) || "";
-      const rider = state.rider ? lower(r[col.rider]) : ""; // rider is already filtered, but keep key stable
+      const rider = state.rider ? lower(r[col.rider]) : "";
       return `${t}__${y}__${dist}__${sx}__${medal}__${rider}`;
     }
 
