@@ -2,17 +2,18 @@ import { el, clear } from "../../core/dom.js";
 import { sectionCard } from "../../core/layout.js";
 import { loadDataset, getMappingWithFallback } from "../../core/storage.js";
 import { toNumber } from "../../core/utils.js";
+import { createSearchableSelect } from "../../core/components/searchableSelect.js";
 
 /**
  * Kampioenen (exact op Excel-kolommen)
- * - Filters: WK/OS, Jaar, Sekse, Afstand, Medaille
+ * - Filters: WK/OS, Jaar, Sekse, Afstand, Medaille, Rijder (dropdown met typen)
  * - Filters compact naast elkaar (met | tussen groepen)
  * - Tabel output: Toernooi, Jaar, Afstand, Pos., Medaille(icoon), Rijder, Nat, Locatie, Datum
  * - Compact: geselecteerde filters worden boven de tabel getoond als titel
- *   bijv. "Olympische Spelen 2022 - 500m mannen"
+ *   bijv. "Olympische Spelen 2022 - 500m | mannen | HWANG Daeheon"
  *
- * Let op (jaar-knoppen):
- * - Voor Olympische Spelen willen we alle jaren vanaf 1992 kunnen kiezen (ook als er nog geen data is ingeladen).
+ * Jaar-knoppen:
+ * - Voor Olympische Spelen: alle jaren vanaf 1992 (ook als er nog geen data is ingeladen).
  */
 export function mountChampions(root){
   clear(root);
@@ -145,9 +146,7 @@ export function mountChampions(root){
   }
   function isMedalRace(v){ return racePriority(v) <= 1; }
 
-  // Year buttons:
-  // - Default from 2019..2026 (as before)
-  // - If OS is selected, show 1992..2026
+  // Jaar knoppen:
   const DEFAULT_YEAR_START = 2019;
   const OS_YEAR_START = 1992;
   const YEAR_END = 2026;
@@ -158,6 +157,7 @@ export function mountChampions(root){
     sexes: new Set(),
     distances: new Set(),
     medals: new Set(),
+    rider: "", // empty = alle rijders
   };
 
   const pill = el("div", { class:"pill" }, "—");
@@ -171,8 +171,8 @@ export function mountChampions(root){
     return { el:b };
   }
 
-  function group(label, bodyEl){
-    return el("div", { style:"min-width: 140px;" }, [
+  function group(label, bodyEl, minWidth=140){
+    return el("div", { style:`min-width:${minWidth}px;` }, [
       el("div", { class:"muted", style:"font-size:12px; margin:0 0 6px 2px; font-weight:800" }, label),
       bodyEl
     ]);
@@ -180,9 +180,26 @@ export function mountChampions(root){
 
   const gType = el("div", {});
   const gYear = el("div", {});
-  const gSex = el("div", {});
   const gDist = el("div", {});
+  const gSex = el("div", {});
+  const gRider = el("div", {});
   const gMedal = el("div", {});
+
+  // Rijder dropdown options (uit kolom C / Naam)
+  const riderValues = Array.from(new Set(rows.map(r => norm(r[col.rider])).filter(Boolean)))
+    .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
+
+  const riderOptions = [{ value:"", label:"Alle rijders" }].concat(
+    riderValues.map(v => ({ value:v, label:v }))
+  );
+
+  const riderSelect = createSearchableSelect({
+    label: null,
+    placeholder: "Alle rijders (typ om te zoeken…)",
+    options: riderOptions,
+    value: "",
+    onChange: (v) => { state.rider = v ?? ""; refresh(); }
+  });
 
   function renderTypeButtons(){
     clear(gType);
@@ -197,7 +214,6 @@ export function mountChampions(root){
   }
 
   function yearButtonsRange(){
-    // If OS selected (alone or with WK), expose full olympic range from 1992
     const start = state.types.has("OS") ? OS_YEAR_START : DEFAULT_YEAR_START;
     const years = [];
     for(let y = start; y <= YEAR_END; y++) years.push(y);
@@ -217,6 +233,17 @@ export function mountChampions(root){
     gYear.appendChild(group("Jaar", row));
   }
 
+  function renderDistanceButtons(){
+    clear(gDist);
+    const row = el("div", { class:"row", style:"gap:10px;" });
+    ["500m","1000m","1500m"].forEach(d => {
+      row.appendChild(toggleBtn(d, () => state.distances.has(d), () => {
+        if(state.distances.has(d)) state.distances.delete(d); else state.distances.add(d);
+      }).el);
+    });
+    gDist.appendChild(group("Afstand", row));
+  }
+
   function renderSexButtons(){
     clear(gSex);
     const row = el("div", { class:"row", style:"gap:10px;" });
@@ -229,15 +256,9 @@ export function mountChampions(root){
     gSex.appendChild(group("Sekse", row));
   }
 
-  function renderDistanceButtons(){
-    clear(gDist);
-    const row = el("div", { class:"row", style:"gap:10px;" });
-    ["500m","1000m","1500m"].forEach(d => {
-      row.appendChild(toggleBtn(d, () => state.distances.has(d), () => {
-        if(state.distances.has(d)) state.distances.delete(d); else state.distances.add(d);
-      }).el);
-    });
-    gDist.appendChild(group("Afstand", row));
+  function renderRiderDropdown(){
+    clear(gRider);
+    gRider.appendChild(group("Rijder", riderSelect.el, 240));
   }
 
   function renderMedalButtons(){
@@ -254,6 +275,7 @@ export function mountChampions(root){
   function applyFiltersRaw(){
     const types = state.types.size ? state.types : new Set(["WK","OS"]);
     const medals = state.medals.size ? state.medals : new Set(["goud","zilver","brons"]);
+    const riderNeedle = lower(state.rider);
 
     return rows.filter(r => {
       if(!isMedalRace(r[col.race])) return false;
@@ -264,11 +286,15 @@ export function mountChampions(root){
       const y = getSeasonValue(r[col.season]);
       if(state.years.size && !state.years.has(y)) return false;
 
+      const dist = getDistanceKey(r[col.distance]);
+      if(state.distances.size && !state.distances.has(dist)) return false;
+
       const sx = getSexValue(r[col.sex]);
       if(state.sexes.size && !state.sexes.has(sx)) return false;
 
-      const dist = getDistanceKey(r[col.distance]);
-      if(state.distances.size && !state.distances.has(dist)) return false;
+      if(riderNeedle){
+        if(lower(r[col.rider]) !== riderNeedle) return false;
+      }
 
       const medal = getMedalFromRanking(r[col.ranking]);
       if(!medal || !medals.has(medal)) return false;
@@ -286,7 +312,8 @@ export function mountChampions(root){
       const dist = getDistanceKey(r[col.distance]) || "";
       const sx = getSexValue(r[col.sex]) || "";
       const medal = getMedalFromRanking(r[col.ranking]) || "";
-      return `${t}__${y}__${dist}__${sx}__${medal}`;
+      const rider = state.rider ? lower(r[col.rider]) : ""; // rider is already filtered, but keep key stable
+      return `${t}__${y}__${dist}__${sx}__${medal}__${rider}`;
     }
 
     function score(r){
@@ -344,20 +371,26 @@ export function mountChampions(root){
     return "";
   }
 
+  function riderLabel(){
+    return state.rider ? state.rider : "";
+  }
+
   function selectionTitle(){
     const t = tournamentLabel();
     const y = yearLabel();
-    const d = distanceLabel();
-    const s = sexLabel();
-
     let left = t;
     if(y) left = `${left} ${y}`;
 
     const rightParts = [];
+    const d = distanceLabel();
+    const s = sexLabel();
+    const r = riderLabel();
+
     if(d) rightParts.push(d);
     if(s) rightParts.push(s);
+    if(r) rightParts.push(r);
 
-    if(rightParts.length) return `${left} - ${rightParts.join(" ")}`;
+    if(rightParts.length) return `${left} - ${rightParts.join(" | ")}`;
     return left;
   }
 
@@ -452,13 +485,15 @@ export function mountChampions(root){
     state.sexes.clear();
     state.distances.clear();
     state.medals.clear();
+    state.rider = "";
     mountChampions(root);
   }
 
   renderTypeButtons();
   renderYearButtons();
-  renderSexButtons();
   renderDistanceButtons();
+  renderSexButtons();
+  renderRiderDropdown();
   renderMedalButtons();
 
   const divider = () => el("div", { class:"muted", style:"opacity:.55; align-self:center; padding: 0 2px;" }, "|");
@@ -467,8 +502,9 @@ export function mountChampions(root){
   }, [
     gType, divider(),
     gYear, divider(),
-    gSex, divider(),
     gDist, divider(),
+    gSex, divider(),
+    gRider, divider(),
     gMedal
   ]);
 
