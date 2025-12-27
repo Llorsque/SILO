@@ -10,12 +10,12 @@ import { createSearchableSelect } from "../../core/components/searchableSelect.j
  * - Filters compact naast elkaar (met | tussen groepen)
  * - Tabel output: Toernooi, Jaar, Afstand, Pos., Medaille(icoon), Rijder, Nat, Locatie, Datum
  * - Compact: geselecteerde filters worden boven de tabel getoond als titel
- *   bijv. "Olympische Spelen 2022 - 500m | mannen | HWANG Daeheon"
+ * - Extra: medaille-overzicht (🥇🥈🥉) per geselecteerd toernooi, gebaseerd op selectie
  *
  * Jaar-knoppen:
- * - Voor Olympische Spelen: alleen de officiële OS-jaren (shorttrack): 1992, 1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022
- * - Voor WK: 2019..2026 (zoals eerder)
- * - Voor WK+OS samen: combinatie van beide sets.
+ * - OS: 1992, 1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022
+ * - WK: 2019..2026
+ * - WK+OS: combinatie
  */
 export function mountChampions(root){
   clear(root);
@@ -163,6 +163,7 @@ export function mountChampions(root){
   };
 
   const pill = el("div", { class:"pill" }, "—");
+  const summaryBox = el("div", {});
   const out = el("div", {});
 
   function toggleBtn(label, isActiveFn, onToggle){
@@ -221,13 +222,11 @@ export function mountChampions(root){
 
     const years = new Set();
 
-    // If OS selected, include the official Olympic years list
     if(hasOS){
       OLYMPIC_YEARS.forEach(y => years.add(y));
     }
 
-    // If WK selected (or no selection yet), include default range
-    // (no selection => show WK+OS default, but we keep legacy: 2019..2026)
+    // If WK selected OR nothing selected yet, include default WK range
     const includeWKRange = hasWK || state.types.size === 0;
     if(includeWKRange){
       for(let y = DEFAULT_YEAR_START; y <= YEAR_END; y++) years.add(y);
@@ -288,7 +287,7 @@ export function mountChampions(root){
     gMedal.appendChild(group("Medailles", row));
   }
 
-  function applyFiltersRaw(){
+  function applyFiltersRaw(opts = { includeMedalFilter: true }){
     const types = state.types.size ? state.types : new Set(["WK","OS"]);
     const medals = state.medals.size ? state.medals : new Set(["goud","zilver","brons"]);
     const riderNeedle = lower(state.rider);
@@ -313,7 +312,11 @@ export function mountChampions(root){
       }
 
       const medal = getMedalFromRanking(r[col.ranking]);
-      if(!medal || !medals.has(medal)) return false;
+      if(!medal) return false;
+
+      if(opts.includeMedalFilter){
+        if(!medals.has(medal)) return false;
+      }
 
       return true;
     });
@@ -328,6 +331,7 @@ export function mountChampions(root){
       const dist = getDistanceKey(r[col.distance]) || "";
       const sx = getSexValue(r[col.sex]) || "";
       const medal = getMedalFromRanking(r[col.ranking]) || "";
+      // Als rijder geselecteerd is, nemen we hem mee in de key (stabieler voor "per rijder" view)
       const rider = state.rider ? lower(r[col.rider]) : "";
       return `${t}__${y}__${dist}__${sx}__${medal}__${rider}`;
     }
@@ -359,6 +363,12 @@ export function mountChampions(root){
     if(state.types.size === 1 && state.types.has("WK")) return "Wereldkampioenschap";
     if(state.types.size === 2) return "OS & WK";
     return "Alle toernooien";
+  }
+
+  function tournamentLong(t){
+    if(t === "OS") return "Olympische Spelen";
+    if(t === "WK") return "Wereldkampioenschap";
+    return t;
   }
 
   function yearLabel(){
@@ -410,14 +420,74 @@ export function mountChampions(root){
     return left;
   }
 
-  function renderTable(list){
+  function renderMedalSummary(dedupedWithoutMedalFilter){
+    clear(summaryBox);
+
+    const activeTypes = state.types.size ? Array.from(state.types) : ["WK","OS"];
+    const order = ["OS","WK"]; // vaste volgorde
+    const typesToShow = order.filter(t => activeTypes.includes(t));
+
+    const byType = new Map();
+    typesToShow.forEach(t => byType.set(t, { goud:0, zilver:0, brons:0, total:0 }));
+
+    dedupedWithoutMedalFilter.forEach(r => {
+      const t = getTypeFromWedstrijd(r[col.competition]);
+      if(!t || !byType.has(t)) return;
+      const medal = getMedalFromRanking(r[col.ranking]);
+      if(!medal) return;
+      const bag = byType.get(t);
+      if(medal === "goud" || medal === "zilver" || medal === "brons"){
+        bag[medal] += 1;
+        bag.total += 1;
+      }
+    });
+
+    const wrap = el("div", {
+      style:"display:flex; flex-wrap:wrap; gap:12px; align-items:stretch; padding: 4px 0 0;"
+    });
+
+    typesToShow.forEach(t => {
+      const bag = byType.get(t);
+      const card = el("div", {
+        style:[
+          "min-width: 220px",
+          "border:1px solid rgba(255,255,255,.08)",
+          "background: rgba(0,0,0,.14)",
+          "border-radius: 16px",
+          "padding: 10px 12px",
+          "display:flex",
+          "flex-direction:column",
+          "gap:8px"
+        ].join(";")
+      });
+
+      card.appendChild(el("div", { class:"muted", style:"font-weight:900; font-size:12px;" }, tournamentLong(t)));
+
+      const row = el("div", { style:"display:flex; gap:10px; align-items:center; flex-wrap:wrap;" }, [
+        el("span", { style:"display:inline-flex; gap:6px; align-items:center; font-weight:800;" }, [ el("span", { class:"medalIcon", title:"goud" }, "🥇"), el("span", {}, String(bag.goud)) ]),
+        el("span", { style:"display:inline-flex; gap:6px; align-items:center; font-weight:800;" }, [ el("span", { class:"medalIcon", title:"zilver" }, "🥈"), el("span", {}, String(bag.zilver)) ]),
+        el("span", { style:"display:inline-flex; gap:6px; align-items:center; font-weight:800;" }, [ el("span", { class:"medalIcon", title:"brons" }, "🥉"), el("span", {}, String(bag.brons)) ]),
+      ]);
+
+      const total = el("div", { class:"muted", style:"font-size:12px; opacity:.8;" }, `${bag.total} medailles`);
+      card.appendChild(row);
+      card.appendChild(total);
+
+      wrap.appendChild(card);
+    });
+
+    // Alleen tonen als er sowieso een selectie / data is (anders blijft ie leeg)
+    summaryBox.appendChild(wrap);
+  }
+
+  function renderTable(dedupedWithMedalFilter){
     clear(out);
 
     out.appendChild(el("div", {
       style: "font-weight:900; font-size:14px; margin: 0 0 10px; opacity: .95;"
     }, selectionTitle()));
 
-    if(list.length === 0){
+    if(dedupedWithMedalFilter.length === 0){
       out.appendChild(el("div", { class:"notice" }, "Geen resultaten met deze selectie."));
       return;
     }
@@ -425,7 +495,7 @@ export function mountChampions(root){
     const medalOrder = { goud:1, zilver:2, brons:3 };
     const distOrder = { "500m":1, "1000m":2, "1500m":3 };
 
-    const sorted = list.slice().sort((a,b) => {
+    const sorted = dedupedWithMedalFilter.slice().sort((a,b) => {
       const ta = getTypeFromWedstrijd(a[col.competition]) || "";
       const tb = getTypeFromWedstrijd(b[col.competition]) || "";
       if(ta !== tb) return ta.localeCompare(tb, "nl");
@@ -490,9 +560,16 @@ export function mountChampions(root){
 
   function refresh(){
     renderYearButtons();
-    const filtered = dedupeToUniqueMedals(applyFiltersRaw());
-    pill.textContent = `${filtered.length.toLocaleString("nl-NL")} resultaten`;
-    renderTable(filtered);
+
+    // Voor overzicht: bereken medailles op basis van selectie, maar negeer de medaille-toggle (zodat je altijd 🥇🥈🥉 ziet)
+    const filteredNoMedalToggle = dedupeToUniqueMedals(applyFiltersRaw({ includeMedalFilter: false }));
+    renderMedalSummary(filteredNoMedalToggle);
+
+    // Voor tabel: respecteer medaille-toggle
+    const filteredWithMedalToggle = dedupeToUniqueMedals(applyFiltersRaw({ includeMedalFilter: true }));
+
+    pill.textContent = `${filteredWithMedalToggle.length.toLocaleString("nl-NL")} resultaten`;
+    renderTable(filteredWithMedalToggle);
   }
 
   function reset(){
@@ -534,6 +611,8 @@ export function mountChampions(root){
       el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnReset]),
       el("div", { class:"hr" }),
       filtersInline,
+      // Medaille samenvatting (per toernooi) in het 'lege vak' onder filters
+      summaryBox,
       el("div", { class:"hr" }),
       out
     ]
