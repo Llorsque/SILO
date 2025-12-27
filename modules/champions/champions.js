@@ -6,10 +6,13 @@ import { toNumber } from "../../core/utils.js";
 /**
  * Kampioenen (exact op Excel-kolommen)
  * - Filters: WK/OS, Jaar, Sekse, Afstand, Medaille
- * - Filters worden compact naast elkaar getoond (met | tussen groepen)
+ * - Filters compact naast elkaar (met | tussen groepen)
  * - Tabel output: Toernooi, Jaar, Afstand, Pos., Medaille(icoon), Rijder, Nat, Locatie, Datum
  * - Compact: geselecteerde filters worden boven de tabel getoond als titel
  *   bijv. "Olympische Spelen 2022 - 500m mannen"
+ *
+ * Let op (jaar-knoppen):
+ * - Voor Olympische Spelen willen we alle jaren vanaf 1992 kunnen kiezen (ook als er nog geen data is ingeladen).
  */
 export function mountChampions(root){
   clear(root);
@@ -142,7 +145,12 @@ export function mountChampions(root){
   }
   function isMedalRace(v){ return racePriority(v) <= 1; }
 
-  const ALL_YEARS = [2019,2020,2021,2022,2023,2024,2025,2026];
+  // Year buttons:
+  // - Default from 2019..2026 (as before)
+  // - If OS is selected, show 1992..2026
+  const DEFAULT_YEAR_START = 2019;
+  const OS_YEAR_START = 1992;
+  const YEAR_END = 2026;
 
   const state = {
     types: new Set(),
@@ -188,15 +196,11 @@ export function mountChampions(root){
     gType.appendChild(group("Toernooi", row));
   }
 
-  function availableYearsForTypes(typesSet){
-    const years = new Set();
-    rows.forEach(r => {
-      const t = getTypeFromWedstrijd(r[col.competition]);
-      if(!t || !typesSet.has(t)) return;
-      if(!isMedalRace(r[col.race])) return;
-      const y = getSeasonValue(r[col.season]);
-      if(y != null) years.add(y);
-    });
+  function yearButtonsRange(){
+    // If OS selected (alone or with WK), expose full olympic range from 1992
+    const start = state.types.has("OS") ? OS_YEAR_START : DEFAULT_YEAR_START;
+    const years = [];
+    for(let y = start; y <= YEAR_END; y++) years.push(y);
     return years;
   }
 
@@ -204,12 +208,7 @@ export function mountChampions(root){
     clear(gYear);
     const row = el("div", { class:"row", style:"gap:10px;" });
 
-    const activeTypes = state.types.size ? state.types : new Set(["WK","OS"]);
-    const available = availableYearsForTypes(activeTypes);
-    const filterYearsByAvailability = state.types.size > 0;
-
-    ALL_YEARS.forEach(y => {
-      if(filterYearsByAvailability && !available.has(y)) return;
+    yearButtonsRange().forEach(y => {
       row.appendChild(toggleBtn(String(y), () => state.years.has(y), () => {
         if(state.years.has(y)) state.years.delete(y); else state.years.add(y);
       }).el);
