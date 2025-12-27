@@ -5,9 +5,10 @@ import { toNumber } from "../../core/utils.js";
 
 /**
  * Kampioenen (exact op Excel-kolommen)
- * - Filters blijven: WK/OS, Jaar, Sekse, Afstand, Medaille
+ * - Filters: WK/OS, Jaar, Sekse, Afstand, Medaille
  * - Tabel output: Toernooi, Jaar, Afstand, Pos., Medaille(icoon), Rijder, Nat, Locatie, Datum
- *   (Sekse en Race niet zichtbaar)
+ * - Compact: geselecteerde filters worden boven de tabel getoond als titel
+ *   bijv. "Olympische Spelen 2022 - 500m mannen"
  */
 export function mountChampions(root){
   clear(root);
@@ -310,8 +311,67 @@ export function mountChampions(root){
     return "•";
   }
 
+  function tournamentLabel(){
+    if(state.types.size === 1 && state.types.has("OS")) return "Olympische Spelen";
+    if(state.types.size === 1 && state.types.has("WK")) return "Wereldkampioenschap";
+    if(state.types.size === 2) return "OS & WK";
+    return "Alle toernooien";
+  }
+
+  function yearLabel(){
+    if(state.years.size === 1) return String(Array.from(state.years)[0]);
+    if(state.years.size > 1){
+      const arr = Array.from(state.years).slice().sort((a,b)=>a-b);
+      // compact range if contiguous
+      const contiguous = arr.every((v,i)=> i===0 || v === arr[i-1]+1);
+      if(contiguous) return `${arr[0]}–${arr[arr.length-1]}`;
+      return arr.join(", ");
+    }
+    return "";
+  }
+
+  function distanceLabel(){
+    if(state.distances.size === 1) return Array.from(state.distances)[0];
+    if(state.distances.size > 1) return Array.from(state.distances).join("/");
+    return "";
+  }
+
+  function sexLabel(){
+    if(state.sexes.size === 1){
+      const v = Array.from(state.sexes)[0];
+      return v === "man" ? "mannen" : (v === "vrouw" ? "vrouwen" : v);
+    }
+    if(state.sexes.size === 2) return "mannen & vrouwen";
+    return "";
+  }
+
+  function selectionTitle(){
+    const t = tournamentLabel();
+    const y = yearLabel();
+    const d = distanceLabel();
+    const s = sexLabel();
+
+    // Build: "Olympische Spelen 2022 - 500m mannen"
+    let left = t;
+    if(y) left = `${left} ${y}`;
+
+    let rightParts = [];
+    if(d) rightParts.push(d);
+    if(s) rightParts.push(s);
+
+    if(rightParts.length){
+      return `${left} - ${rightParts.join(" ")}`;
+    }
+    return left;
+  }
+
   function renderTable(list){
     clear(out);
+
+    const title = selectionTitle();
+    out.appendChild(el("div", {
+      style: "font-weight:900; font-size:14px; margin: 0 0 10px; opacity: .95;"
+    }, title));
 
     if(list.length === 0){
       out.appendChild(el("div", { class:"notice" }, "Geen resultaten met deze selectie."));
