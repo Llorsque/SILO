@@ -8,9 +8,14 @@ import { createSearchableSelect } from "../../core/components/searchableSelect.j
  * Head-to-Head (SILO)
  * - Aantal rijders: 2-4 (default 2)
  * - Toernooi: dropdown (typbaar) met ALLE unieke waarden uit kolom F (Wedstrijd)
- * - Afstand: knoppen 500m / 1000m / 1500m (multi-select) gebaseerd op kolom H (Afstand)
- * - Data (metrics) o.a. podium (pos 1/2/3), WK/OS medailles, meetings, etc.
- * - Pairwise: per duel tonen hoeveel keer A "won" (voor B eindigde) en omgekeerd.
+ * - Afstand: knoppen 500m / 1000m / 1500m + Eindklassement (multi-select)
+ *   - Eindklassement wordt herkend uit kolom H (Afstand) als tekst "eindklassement" of "overall".
+ *
+ * Vergelijken "tegen elkaar":
+ * - Omdat heats/rit-informatie ontbreekt, vergelijken we op "zelfde uitslag":
+ *   - dezelfde wedstrijd + locatie + afstand + datum + race + sekse + seizoen
+ *   - vervolgens vergelijken we de posities (Ranking). Lagere ranking = betere positie.
+ *   - A wint als A een lagere ranking heeft dan B in diezelfde uitslag.
  */
 export function mountHeadToHead(root){
   clear(root);
@@ -67,13 +72,14 @@ export function mountHeadToHead(root){
 
   function distanceKey(v){
     const s = lower(v);
+    if(s.includes("eindklassement") || s.includes("overall")) return "Eindklassement";
     if(s.includes("500")) return "500m";
     if(s.includes("1000")) return "1000m";
     if(s.includes("1500")) return "1500m";
-    return null; // only support these three in this module
+    return null;
   }
 
-  // Toernooi options: ALL unique values from column F / Wedstrijd (as requested)
+  // Toernooi options: ALL unique values from column F / Wedstrijd
   const competitions = uniq(rowsAll.map(r => norm(r[col.competition])).filter(Boolean))
     .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
 
@@ -87,14 +93,13 @@ export function mountHeadToHead(root){
   let count = 2;
   const selected = new Array(MAX).fill("");
 
-  const ALLOWED_DISTANCES = ["500m","1000m","1500m"];
+  const ALLOWED_DISTANCES = ["500m","1000m","1500m","Eindklassement"];
 
   const state = {
-    competition: "",          // all
-    distances: new Set()      // empty => all three distances (within allowed)
+    competition: "",
+    distances: new Set() // empty => all allowed
   };
 
-  // Toernooi selector (typable)
   const competitionSel = createSearchableSelect({
     label:"Toernooi",
     placeholder:"Alle toernooien (typ om te zoeken…)",
@@ -103,7 +108,6 @@ export function mountHeadToHead(root){
     onChange:(v)=>{ state.competition = v || ""; renderAll(); }
   });
 
-  // Count selector
   const countSel = createSearchableSelect({
     label:"Aantal rijders",
     options:[2,3,4].map(n => ({ value:String(n), label:`${n} rijders` })),
@@ -115,7 +119,6 @@ export function mountHeadToHead(root){
     }
   });
 
-  // UI containers
   const topRow = el("div", { class:"grid grid--4" });
   const distanceRow = el("div", {});
   const selectorsWrap = el("div", { class:"grid grid--4" });
@@ -123,30 +126,23 @@ export function mountHeadToHead(root){
   const tableWrap = el("div", {});
   const pairWrap = el("div", {});
 
-  function isDistanceAllowed(r){
-    return distanceKey(r[col.distance]) !== null;
-  }
-
   function getFilteredRows(){
     return rowsAll.filter(r => {
       if(state.competition && norm(r[col.competition]) !== state.competition) return false;
 
-      // Only 500/1000/1500 in this module
       const dk = distanceKey(r[col.distance]);
       if(!dk) return false;
 
-      // If user selected distances, filter by that; otherwise treat as "all allowed"
       if(state.distances.size && !state.distances.has(dk)) return false;
 
       return true;
     });
   }
 
-  // Build event indexes from filtered rows so meetings + pairwise respects filters
   function buildIndexes(rows){
-    const eventToRiders = new Map(); // eventKey -> Set(name)
-    const riderToEvents = new Map(); // name -> Set(eventKey)
-    const eventToRankByRider = new Map(); // eventKey -> Map(name -> rank)
+    const eventToRiders = new Map();
+    const riderToEvents = new Map();
+    const eventToRankByRider = new Map();
 
     const eventKey = (r) => [
       lower(r[col.competition]),
@@ -199,7 +195,12 @@ export function mountHeadToHead(root){
     const osMedals = rRows.filter(r => tournamentType(r[col.competition]) === "OS")
       .map(r => toNumber(r[col.ranking])).filter(n => n != null && n <= 3).length;
 
-    return { starts, gold, silver, bronze, podiums, avg, best, wkMedals, osMedals };
+    const endWins = rRows
+      .filter(r => distanceKey(r[col.distance]) === "Eindklassement")
+      .map(r => toNumber(r[col.ranking]))
+      .filter(n => n === 1).length;
+
+    return { starts, gold, silver, bronze, podiums, avg, best, wkMedals, osMedals, endWins };
   }
 
   function meetingsFor(name, chosen, idx){
@@ -216,6 +217,7 @@ export function mountHeadToHead(root){
     for(const k of events){
       const set = idx.eventToRiders.get(k);
       if(!set) continue;
+
       let hit = false;
       for(const o of others){
         if(set.has(o)){ hit = true; break; }
@@ -249,8 +251,9 @@ export function mountHeadToHead(root){
             unknown += 1;
             continue;
           }
-          if(ra < rb) aWins += 1;         // A eindigt vóór B
-          else if(rb < ra) bWins += 1;    // B eindigt vóór A
+
+          if(ra < rb) aWins += 1;
+          else if(rb < ra) bWins += 1;
           else ties += 1;
         }
 
@@ -260,28 +263,21 @@ export function mountHeadToHead(root){
     return pairs.sort((x,y)=>y.meetings - x.meetings);
   }
 
-  // Afstand buttons (500/1000/1500) + All
   function renderDistanceButtons(){
     clear(distanceRow);
 
     const label = el("div", { class:"muted", style:"font-size:12px; margin:0 0 6px 2px; font-weight:800" }, "Afstanden");
     const row = el("div", { class:"row", style:"gap:10px; flex-wrap:wrap; align-items:flex-end;" });
 
-    const visible = ALLOWED_DISTANCES; // fixed set
-    const allActive = visible.every(k => state.distances.has(k)) || (state.distances.size === 0);
+    const visible = ALLOWED_DISTANCES;
+    const allActive = (state.distances.size === 0) || visible.every(k => state.distances.has(k));
 
     const btnAll = el("button", { class:"btn", type:"button", style:"padding:8px 10px; border-radius:14px; font-weight:800;" }, "All");
     btnAll.classList.toggle("btn--primary", allActive);
     btnAll.addEventListener("click", ()=>{
-      if(allActive){
-        visible.forEach(k => state.distances.delete(k));
-      } else {
-        visible.forEach(k => state.distances.add(k));
-      }
-      // If user turned all off, keep empty set meaning "all allowed"
-      if(state.distances.size === 0){
-        // empty means "all allowed" - keep it empty
-      }
+      // Toggle between "all implied" (empty) and "explicit all"
+      if(state.distances.size === 0) state.distances = new Set(visible);
+      else state.distances = new Set();
       renderDistanceButtons();
       renderAll();
     });
@@ -289,19 +285,17 @@ export function mountHeadToHead(root){
     row.appendChild(btnAll);
 
     visible.forEach(k => {
-      const active = state.distances.size === 0 ? true : state.distances.has(k);
+      const active = (state.distances.size === 0) ? true : state.distances.has(k);
       const b = el("button", { class:"btn", type:"button", style:"padding:8px 10px; border-radius:14px; font-weight:800;" }, k);
       b.classList.toggle("btn--primary", active);
       b.addEventListener("click", ()=>{
-        // when in "empty/all" state, clicking one should start an explicit selection of just that one
         if(state.distances.size === 0){
           state.distances = new Set([k]);
         } else {
           if(state.distances.has(k)) state.distances.delete(k);
           else state.distances.add(k);
-          // if user deselects everything, revert to empty (meaning all)
           if(state.distances.size === 0){
-            // keep empty: all
+            // keep empty => all
           }
         }
         renderDistanceButtons();
@@ -314,7 +308,6 @@ export function mountHeadToHead(root){
     distanceRow.appendChild(row);
   }
 
-  // Rider selectors
   function renderSelectors(){
     clear(selectorsWrap);
     for(let i=0;i<count;i++){
@@ -329,7 +322,6 @@ export function mountHeadToHead(root){
     }
   }
 
-  // Metrics / Data picker
   const METRICS = [
     { key:"gold",     label:"🥇 Goud (pos 1)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"silver",   label:"🥈 Zilver (pos 2)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
@@ -337,13 +329,14 @@ export function mountHeadToHead(root){
     { key:"podiums",  label:"Podiums (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"wkMedals", label:"WK medailles (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"osMedals", label:"OS medailles (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"meetings", label:"Tegen elkaar gereden", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"endWins",  label:"Eindklassement gewonnen (pos 1)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"meetings", label:"Zelfde uitslag (met elkaar)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"starts",   label:"Starts / rijen", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"avg",      label:"Gem. ranking", lowerBetter:true, fmt:(v)=> v == null ? "—" : Number(v).toFixed(2) },
     { key:"best",     label:"Beste ranking", lowerBetter:true, fmt:(v)=> v == null ? "—" : String(v) },
   ];
 
-  const selectedMetrics = new Set(["gold","podiums","meetings","wkMedals","osMedals"]);
+  const selectedMetrics = new Set(["gold","podiums","meetings","wkMedals","osMedals","endWins"]);
 
   function metricPill(metricKey){
     const def = METRICS.find(m => m.key === metricKey);
@@ -433,10 +426,9 @@ export function mountHeadToHead(root){
 
     const defs = activeMetricKeys.map(k => METRICS.find(m => m.key === k)).filter(Boolean);
 
-    // Context line
     const ctxParts = [];
     if(state.competition) ctxParts.push(state.competition);
-    const distLabel = state.distances.size === 0 ? "500m / 1000m / 1500m" : Array.from(state.distances).join(" / ");
+    const distLabel = (state.distances.size === 0) ? ALLOWED_DISTANCES.join(" / ") : Array.from(state.distances).join(" / ");
     ctxParts.push(distLabel);
     const ctx = ctxParts.join(" | ");
     tableWrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:800; opacity:.9; margin-bottom:8px" }, ctx));
@@ -467,13 +459,13 @@ export function mountHeadToHead(root){
     if(pairs.length === 0) return;
 
     pairWrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:900; margin: 6px 0 10px;" },
-      "Duel uitslagen (wie eindigde vaker vóór wie)"
+      "Duel uitslagen (zelfde uitslag, vergelijken op positie)"
     ));
 
     pairWrap.appendChild(el("table", { class:"table" }, [
       el("thead", {}, el("tr", {}, [
         el("th", {}, "Duel"),
-        el("th", {}, "Samen gereden"),
+        el("th", {}, "Samen in uitslag"),
         el("th", {}, "Winst A"),
         el("th", {}, "Winst B"),
         el("th", {}, "Gelijk"),
@@ -518,7 +510,6 @@ export function mountHeadToHead(root){
     }
   }
 
-  // Top layout
   clear(topRow);
   topRow.appendChild(competitionSel.el);
   topRow.appendChild(countSel.el);
