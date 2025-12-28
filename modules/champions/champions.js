@@ -590,34 +590,58 @@ export function mountChampions(root){
   renderMedalButtons();
 
   const divider = () => el("div", { class:"muted", style:"opacity:.55; align-self:center; padding: 0 2px;" }, "|");
-  const filtersInline = el("div", {
-    style:"display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; padding: 2px 0 6px;"
-  }, [
-    gType, divider(),
-    gYear, divider(),
-    gDist, divider(),
-    gSex, divider(),
-    gRider, divider(),
-    gMedal
-  ]);
 
-  const btnReset = el("button", { class:"btn", type:"button" }, "Reset");
-  btnReset.addEventListener("click", reset);
+/**
+ * Layout: filters in 1 grid row with | dividers.
+ * Medal summary blocks sit in the 'empty space' under Afstand + Sekse (grid row 2, spanning those columns),
+ * so everything lines up better.
+ */
+const filtersGrid = el("div", {
+  style:[
+    "display:grid",
+    "grid-template-columns: auto 12px auto 12px auto 12px auto 12px 260px 12px auto",
+    "align-items:end",
+    "column-gap: 0px",
+    "row-gap: 10px",
+    "padding: 2px 0 6px"
+  ].join(";")
+});
 
-  const card = sectionCard({
-    title:"Kampioenen",
-    subtitle:"Toont einduitslagen (Final A/Final) en 1 unieke medaille per categorie.",
-    children:[
-      el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnReset]),
-      el("div", { class:"hr" }),
-      filtersInline,
-      // Medaille samenvatting (per toernooi) in het 'lege vak' onder filters
-      summaryBox,
-      el("div", { class:"hr" }),
-      out
-    ]
-  });
+// Row 1
+filtersGrid.appendChild(gType);
+filtersGrid.appendChild(divider());
+filtersGrid.appendChild(gYear);
+filtersGrid.appendChild(divider());
+filtersGrid.appendChild(gDist);
+filtersGrid.appendChild(divider());
+filtersGrid.appendChild(gSex);
+filtersGrid.appendChild(divider());
+filtersGrid.appendChild(gRider);
+filtersGrid.appendChild(divider());
+filtersGrid.appendChild(gMedal);
 
-  root.appendChild(card);
-  refresh();
+// Row 2: medal summary under Afstand + Sekse (including the divider column between them)
+summaryBox.style.gridColumn = "5 / 9";
+summaryBox.style.marginTop = "2px";
+summaryBox.style.padding = "0";
+
+const btnReset = el("button", { class:"btn", type:"button" }, "Reset");
+btnReset.addEventListener("click", reset);
+
+const card = sectionCard({
+  title:"Kampioenen",
+  subtitle:"Toont einduitslagen (Final A/Final) en 1 unieke medaille per categorie.",
+  children:[
+    el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnReset]),
+    el("div", { class:"hr" }),
+    filtersGrid,
+    // medal summary now lives visually under Afstand + Sekse
+    summaryBox,
+    el("div", { class:"hr" }),
+    out
+  ]
+});
+
+root.appendChild(card);
+refresh();
 }
