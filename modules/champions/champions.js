@@ -237,9 +237,21 @@ export function mountChampions(root){
 
   function renderYearButtons(){
     clear(gYear);
-    const row = el("div", { class:"row", style:"gap:10px;" });
+    const row = el("div", { class:"row", style:"gap:10px; flex-wrap:wrap;" });
 
-    yearButtonsRange().forEach(y => {
+    const years = yearButtonsRange();
+
+    // "All" toggles all currently visible year options
+    const allActive = years.length > 0 && years.every(y => state.years.has(y));
+    row.appendChild(toggleBtn("All", () => allActive, () => {
+      if(allActive){
+        years.forEach(y => state.years.delete(y));
+      } else {
+        years.forEach(y => state.years.add(y));
+      }
+    }).el);
+
+    years.forEach(y => {
       row.appendChild(toggleBtn(String(y), () => state.years.has(y), () => {
         if(state.years.has(y)) state.years.delete(y); else state.years.add(y);
       }).el);
@@ -589,7 +601,7 @@ export function mountChampions(root){
   renderRiderDropdown();
   renderMedalButtons();
 
-  const divider = () => el("div", { class:"muted", style:"opacity:.55; align-self:center; padding: 0 2px;" }, "|");
+  const divider = () => el("div", { style:"width:1px; background: rgba(255,255,255,.10); align-self:stretch; border-radius:1px;" });
 
 /**
  * Layout: filters in 1 grid row with | dividers.
@@ -599,8 +611,8 @@ export function mountChampions(root){
 const filtersGrid = el("div", {
   style:[
     "display:grid",
-    "grid-template-columns: auto 12px auto 12px auto 12px auto 12px 260px 12px auto",
-    "align-items:end",
+    "grid-template-columns: auto 10px auto 10px auto 10px auto 10px 320px 10px auto",
+    "align-items:start",
     "column-gap: 0px",
     "row-gap: 10px",
     "padding: 2px 0 6px"
