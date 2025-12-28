@@ -4,11 +4,22 @@ import { loadDataset, getMappingWithFallback } from "../../core/storage.js";
 import { uniq, toNumber } from "../../core/utils.js";
 import { createSearchableSelect } from "../../core/components/searchableSelect.js";
 
+/**
+ * Head-to-Head
+ * - Aantal rijders: 2-4 (default 2)
+ * - Filters: Toernooi (kolom F / Wedstrijd), Afstand (kolom H / Afstand)
+ * - Data (metrics) kiesbaar:
+ *   - Aantal keer gewonnen (Ranking=1)
+ *   - Aantal keer tegen elkaar gereden (unieke race-instanties met overlap)
+ *   - + extra's (starts/podiums/avg/best)
+ *
+ * Alles wordt herleid uit geüploade dataset.
+ */
 export function mountHeadToHead(root){
   clear(root);
 
-  const rows = loadDataset();
-  if(!rows || rows.length === 0){
+  const rowsAll = loadDataset();
+  if(!rowsAll || rowsAll.length === 0){
     root.appendChild(sectionCard({
       title:"Head-to-Head",
       subtitle:"Upload eerst een Excel-bestand in het hoofdmenu.",
@@ -17,30 +28,86 @@ export function mountHeadToHead(root){
     return;
   }
 
-  const cols = Object.keys(rows[0] || {});
+  const cols = Object.keys(rowsAll[0] || {});
   const map = getMappingWithFallback(cols);
+  const pick = (preferred, fallback) => cols.includes(preferred) ? preferred : fallback;
+
+  const col = {
+    race:        pick("Race",      map.race),
+    ranking:     pick("Ranking",   map.ranking),
+    rider:       pick("Naam",      map.rider),
+    nat:         pick("Nat.",      map.nat),
+    competition: pick("Wedstrijd", map.competition),
+    location:    pick("Locatie",   map.location),
+    distance:    pick("Afstand",   map.distance),
+    date:        pick("Datum",     map.date),
+    season:      pick("Seizoen",   map.season),
+    sex:         pick("Sekse",     map.sex),
+  };
+
+  const missing = Object.entries(col).filter(([_, v]) => !v || !cols.includes(v)).map(([k]) => k);
+  if(missing.length){
+    root.appendChild(sectionCard({
+      title:"Head-to-Head",
+      subtitle:"Kolommen ontbreken of zijn niet herkend.",
+      children:[
+        el("div", { class:"notice" },
+          "Ik kan deze kolommen niet vinden: " + missing.join(", ") +
+          ". Controleer de kolomkoppen of stel mapping in via het tandwiel.")
+      ]
+    }));
+    return;
+  }
 
   const norm = (v) => String(v ?? "").trim();
   const lower = (v) => norm(v).toLowerCase();
 
-  // Riders
-  const riders = uniq(rows.map(r => norm(r[map.rider])).filter(Boolean))
+  // Options for filters derived from dataset content
+  const competitions = uniq(rowsAll.map(r => norm(r[col.competition])).filter(Boolean))
     .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
 
+  const distances = uniq(rowsAll.map(r => norm(r[col.distance])).filter(Boolean))
+    .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
+
+  // Riders (global list)
+  const riders = uniq(rowsAll.map(r => norm(r[col.rider])).filter(Boolean))
+    .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
   const riderOptions = riders.map(r => ({ value:r, label:r }));
 
-  // Count selector (max 4, default 2)
-  let count = 2;
+  // State
   const MAX = 4;
+  let count = 2;
   const selected = new Array(MAX).fill("");
 
+  const state = {
+    competition: "", // all
+    distance: "",    // all
+  };
+
+  // Filter selectors (typable)
+  const competitionSel = createSearchableSelect({
+    label:"Toernooi",
+    placeholder:"Alle toernooien (typ om te zoeken…)",
+    options:[{ value:"", label:"Alle toernooien" }, ...competitions.map(v => ({ value:v, label:v }))],
+    value:"",
+    onChange:(v)=>{ state.competition = v || ""; renderAll(); }
+  });
+
+  const distanceSel = createSearchableSelect({
+    label:"Afstand",
+    placeholder:"Alle afstanden (typ om te zoeken…)",
+    options:[{ value:"", label:"Alle afstanden" }, ...distances.map(v => ({ value:v, label:v }))],
+    value:"",
+    onChange:(v)=>{ state.distance = v || ""; renderAll(); }
+  });
+
+  // Count selector (max 4, default 2)
   const countSel = createSearchableSelect({
     label:"Aantal rijders",
     options:[2,3,4].map(n => ({ value:String(n), label:`${n} rijders` })),
     value:String(count),
     onChange:(v)=>{
       count = Math.min(MAX, Math.max(2, Number(v)||2));
-      // Keep only first N selections visible; others remain stored but ignored
       renderSelectors();
       renderAll();
     }
@@ -56,41 +123,55 @@ export function mountHeadToHead(root){
     { key:"best",     label:"Beste ranking", lowerBetter:true, fmt:(v)=> v == null ? "—" : String(v) },
   ];
 
-  // Default: 2 metrics requested (wins + meetings)
   const selectedMetrics = new Set(["wins","meetings"]);
 
-  // Pre-index events so we can compute "tegen elkaar gereden" from uploaded data
-  // An "event" here is a unique race instance: competition+location+distance+date+race+sex+season
-  const eventToRiders = new Map();      // eventKey -> Set(riderName)
-  const riderToEvents = new Map();      // riderName -> Set(eventKey)
+  // UI containers
+  const topFilters = el("div", { class:"grid grid--4" });
+  const selectorsWrap = el("div", { class:"grid grid--4" });
+  const dataWrap = el("div", {});
+  const tableWrap = el("div", {});
 
-  function eventKey(r){
-    return [
-      lower(r[map.competition]),
-      lower(r[map.location]),
-      lower(r[map.distance]),
-      lower(r[map.date]),
-      lower(r[map.race]),
-      lower(r[map.sex]),
-      lower(r[map.season]),
+  function getFilteredRows(){
+    return rowsAll.filter(r => {
+      if(state.competition && norm(r[col.competition]) !== state.competition) return false;
+      if(state.distance && norm(r[col.distance]) !== state.distance) return false;
+      return true;
+    });
+  }
+
+  // Build indexes from filtered rows so "meetings" respects selection
+  function buildIndexes(rows){
+    const eventToRiders = new Map(); // eventKey -> Set(name)
+    const riderToEvents = new Map(); // name -> Set(eventKey)
+
+    const eventKey = (r) => [
+      lower(r[col.competition]),
+      lower(r[col.location]),
+      lower(r[col.distance]),
+      lower(r[col.date]),
+      lower(r[col.race]),
+      lower(r[col.sex]),
+      lower(r[col.season]),
     ].join("||");
+
+    for(const r of rows){
+      const name = norm(r[col.rider]);
+      if(!name) continue;
+      const k = eventKey(r);
+
+      if(!eventToRiders.has(k)) eventToRiders.set(k, new Set());
+      eventToRiders.get(k).add(name);
+
+      if(!riderToEvents.has(name)) riderToEvents.set(name, new Set());
+      riderToEvents.get(name).add(k);
+    }
+
+    return { eventToRiders, riderToEvents };
   }
 
-  for(const r of rows){
-    const name = norm(r[map.rider]);
-    if(!name) continue;
-    const k = eventKey(r);
-
-    if(!eventToRiders.has(k)) eventToRiders.set(k, new Set());
-    eventToRiders.get(k).add(name);
-
-    if(!riderToEvents.has(name)) riderToEvents.set(name, new Set());
-    riderToEvents.get(name).add(k);
-  }
-
-  function kpisFor(name){
-    const rRows = rows.filter(r => norm(r[map.rider]) === name);
-    const rk = rRows.map(r => toNumber(r[map.ranking])).filter(n => n != null);
+  function kpisFor(name, rows){
+    const rRows = rows.filter(r => norm(r[col.rider]) === name);
+    const rk = rRows.map(r => toNumber(r[col.ranking])).filter(n => n != null);
 
     const starts = rRows.length;
     const wins = rk.filter(n => n === 1).length;
@@ -101,22 +182,20 @@ export function mountHeadToHead(root){
     return { starts, wins, podiums, avg, best };
   }
 
-  function meetingsFor(name, chosen){
-    // Count distinct events where name participated AND at least 1 other chosen rider also participated
+  function meetingsFor(name, chosen, idx){
     if(!name) return 0;
     if(!chosen || chosen.length < 2) return 0;
 
     const others = new Set(chosen.filter(n => n && n !== name));
     if(others.size === 0) return 0;
 
-    const events = riderToEvents.get(name);
+    const events = idx.riderToEvents.get(name);
     if(!events) return 0;
 
     let c = 0;
     for(const k of events){
-      const set = eventToRiders.get(k);
+      const set = idx.eventToRiders.get(k);
       if(!set) continue;
-      // intersection with others
       let hit = false;
       for(const o of others){
         if(set.has(o)){ hit = true; break; }
@@ -126,24 +205,15 @@ export function mountHeadToHead(root){
     return c;
   }
 
-  // UI: selectors
-  const selectorsWrap = el("div", { class:"grid grid--4" });
-  const dataWrap = el("div", {});
-  const tableWrap = el("div", {});
-
   function renderSelectors(){
     clear(selectorsWrap);
-
     for(let i=0;i<count;i++){
       const sel = createSearchableSelect({
         label:`Rijder ${i+1}`,
         placeholder:"Typ om te zoeken…",
         options:[{ value:"", label:"— kies rijder —" }, ...riderOptions],
         value:selected[i] || "",
-        onChange:(v)=>{
-          selected[i] = v || "";
-          renderAll();
-        }
+        onChange:(v)=>{ selected[i] = v || ""; renderAll(); }
       });
       selectorsWrap.appendChild(sel.el);
     }
@@ -165,14 +235,12 @@ export function mountHeadToHead(root){
       renderAll();
     });
 
-    // Visual state
     if(selectedMetrics.has(metricKey)){
       pill.style.borderColor = "rgba(82,232,232,.35)";
       pill.style.fontWeight = "900";
     } else {
       pill.style.opacity = ".75";
     }
-
     return pill;
   }
 
@@ -201,7 +269,6 @@ export function mountHeadToHead(root){
       }
     }
     search.addEventListener("input", renderList);
-
     renderList();
 
     dataWrap.appendChild(titleRow);
@@ -227,13 +294,15 @@ export function mountHeadToHead(root){
       return;
     }
 
+    const rows = getFilteredRows();
+    const idx = buildIndexes(rows);
+
     const stats = chosen.map(n => {
-      const base = kpisFor(n);
-      const meetings = meetingsFor(n, chosen);
+      const base = kpisFor(n, rows);
+      const meetings = meetingsFor(n, chosen, idx);
       return { name:n, meetings, ...base };
     });
 
-    // Ranges for highlighting
     const ranges = {};
     for(const key of activeMetricKeys){
       const vals = stats.map(s => s[key]).filter(v => v != null);
@@ -242,10 +311,12 @@ export function mountHeadToHead(root){
 
     const defs = activeMetricKeys.map(k => METRICS.find(m => m.key === k)).filter(Boolean);
 
-    tableWrap.appendChild(el("div", { class:"notice" },
-      "Tip: hoogste is ‘beste’ bij wins/podiums/starts/tegen elkaar gereden. Bij ranking is lager beter."
-    ));
-    tableWrap.appendChild(el("div", { style:"height:10px" }));
+    // Context line to show current filters
+    const parts = [];
+    if(state.competition) parts.push(state.competition);
+    if(state.distance) parts.push(state.distance);
+    const ctx = parts.length ? parts.join(" | ") : "Alle data";
+    tableWrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:800; opacity:.9; margin-bottom:8px" }, ctx));
 
     tableWrap.appendChild(el("table", { class:"table" }, [
       el("thead", {}, el("tr", {}, ["Data", ...chosen].map(h => el("th", {}, h)))),
@@ -272,14 +343,22 @@ export function mountHeadToHead(root){
     renderTable();
   }
 
+  // Top filters row
+  clear(topFilters);
+  topFilters.appendChild(competitionSel.el);
+  topFilters.appendChild(distanceSel.el);
+  topFilters.appendChild(countSel.el);
+  // empty filler so it aligns nicely in grid--4
+  topFilters.appendChild(el("div", {}));
+
   renderSelectors();
   renderAll();
 
   root.appendChild(sectionCard({
     title:"Head-to-Head",
-    subtitle:"Vergelijk rijders in één oogopslag.",
+    subtitle:"Vergelijk rijders in één oogopslag (met filters op toernooi en afstand).",
     children:[
-      el("div", { class:"row" }, [countSel.el]),
+      topFilters,
       el("div", { class:"hr" }),
       selectorsWrap,
       el("div", { class:"hr" }),
