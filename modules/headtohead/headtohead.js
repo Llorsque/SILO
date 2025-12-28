@@ -5,15 +5,18 @@ import { uniq, toNumber } from "../../core/utils.js";
 import { createSearchableSelect } from "../../core/components/searchableSelect.js";
 
 /**
- * Head-to-Head
+ * Head-to-Head (SILO)
  * - Aantal rijders: 2-4 (default 2)
- * - Filters: Toernooi (kolom F / Wedstrijd), Afstand (kolom H / Afstand)
+ * - Filters:
+ *   - Toernooi (dropdown / typbaar) op kolom F (Wedstrijd)
+ *   - Afstanden (knoppen / multi-select) gebaseerd op waarden in de upload
  * - Data (metrics) kiesbaar:
- *   - Aantal keer gewonnen (Ranking=1)
- *   - Aantal keer tegen elkaar gereden (unieke race-instanties met overlap)
- *   - + extra's (starts/podiums/avg/best)
+ *   - Wins (pos 1), Zilver (pos 2), Brons (pos 3), Podiums (≤3)
+ *   - WK medailles (≤3), OS medailles (≤3)
+ *   - Aantal keer tegen elkaar gereden (overlap in unieke race-instanties)
+ *   - Pairwise "wie eindigde vaker voor wie" per rijders-paar
  *
- * Alles wordt herleid uit geüploade dataset.
+ * Alles is herleid uit de geüploade dataset.
  */
 export function mountHeadToHead(root){
   clear(root);
@@ -36,7 +39,6 @@ export function mountHeadToHead(root){
     race:        pick("Race",      map.race),
     ranking:     pick("Ranking",   map.ranking),
     rider:       pick("Naam",      map.rider),
-    nat:         pick("Nat.",      map.nat),
     competition: pick("Wedstrijd", map.competition),
     location:    pick("Locatie",   map.location),
     distance:    pick("Afstand",   map.distance),
@@ -62,14 +64,32 @@ export function mountHeadToHead(root){
   const norm = (v) => String(v ?? "").trim();
   const lower = (v) => norm(v).toLowerCase();
 
-  // Options for filters derived from dataset content
+  function tournamentType(v){
+    const s = lower(v);
+    if(s.includes("olympische spelen")) return "OS";
+    if(s.includes("wereldkampioenschap")) return "WK";
+    return null;
+  }
+
+  function distanceKey(v){
+    const s = lower(v);
+    // try to normalize on numbers
+    if(s.includes("500")) return "500m";
+    if(s.includes("1000")) return "1000m";
+    if(s.includes("1500")) return "1500m";
+    // fallback: compact label from original
+    return norm(v) || "";
+  }
+
+  // Options for "Toernooi" derived from dataset content
   const competitions = uniq(rowsAll.map(r => norm(r[col.competition])).filter(Boolean))
     .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
 
-  const distances = uniq(rowsAll.map(r => norm(r[col.distance])).filter(Boolean))
+  // Available distance keys present in data
+  const availableDistKeys = uniq(rowsAll.map(r => distanceKey(r[col.distance])).filter(Boolean))
     .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
 
-  // Riders (global list)
+  // Riders list (global)
   const riders = uniq(rowsAll.map(r => norm(r[col.rider])).filter(Boolean))
     .sort((a,b)=>a.localeCompare(b, "nl", { sensitivity:"base" }));
   const riderOptions = riders.map(r => ({ value:r, label:r }));
@@ -80,11 +100,11 @@ export function mountHeadToHead(root){
   const selected = new Array(MAX).fill("");
 
   const state = {
-    competition: "", // all
-    distance: "",    // all
+    competition: "",      // all
+    distances: new Set()  // empty = all
   };
 
-  // Filter selectors (typable)
+  // Toernooi selector (typable)
   const competitionSel = createSearchableSelect({
     label:"Toernooi",
     placeholder:"Alle toernooien (typ om te zoeken…)",
@@ -93,15 +113,7 @@ export function mountHeadToHead(root){
     onChange:(v)=>{ state.competition = v || ""; renderAll(); }
   });
 
-  const distanceSel = createSearchableSelect({
-    label:"Afstand",
-    placeholder:"Alle afstanden (typ om te zoeken…)",
-    options:[{ value:"", label:"Alle afstanden" }, ...distances.map(v => ({ value:v, label:v }))],
-    value:"",
-    onChange:(v)=>{ state.distance = v || ""; renderAll(); }
-  });
-
-  // Count selector (max 4, default 2)
+  // Count selector
   const countSel = createSearchableSelect({
     label:"Aantal rijders",
     options:[2,3,4].map(n => ({ value:String(n), label:`${n} rijders` })),
@@ -113,41 +125,35 @@ export function mountHeadToHead(root){
     }
   });
 
-  // Data (metrics) selection
-  const METRICS = [
-    { key:"wins",     label:"Aantal keer gewonnen", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"meetings", label:"Aantal keer tegen elkaar gereden", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"starts",   label:"Starts / rijen", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"podiums",  label:"Podiums (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"avg",      label:"Gem. ranking", lowerBetter:true, fmt:(v)=> v == null ? "—" : Number(v).toFixed(2) },
-    { key:"best",     label:"Beste ranking", lowerBetter:true, fmt:(v)=> v == null ? "—" : String(v) },
-  ];
-
-  const selectedMetrics = new Set(["wins","meetings"]);
-
   // UI containers
-  const topFilters = el("div", { class:"grid grid--4" });
+  const topRow = el("div", { class:"grid grid--4" });
+  const distanceRow = el("div", {});
   const selectorsWrap = el("div", { class:"grid grid--4" });
   const dataWrap = el("div", {});
   const tableWrap = el("div", {});
+  const pairWrap = el("div", {});
 
   function getFilteredRows(){
     return rowsAll.filter(r => {
       if(state.competition && norm(r[col.competition]) !== state.competition) return false;
-      if(state.distance && norm(r[col.distance]) !== state.distance) return false;
+      if(state.distances.size){
+        const dk = distanceKey(r[col.distance]);
+        if(!state.distances.has(dk)) return false;
+      }
       return true;
     });
   }
 
-  // Build indexes from filtered rows so "meetings" respects selection
+  // Build event indexes from filtered rows so meetings + pairwise respects current filters
   function buildIndexes(rows){
     const eventToRiders = new Map(); // eventKey -> Set(name)
     const riderToEvents = new Map(); // name -> Set(eventKey)
+    const eventToRankByRider = new Map(); // eventKey -> Map(name -> rank)
 
     const eventKey = (r) => [
       lower(r[col.competition]),
       lower(r[col.location]),
-      lower(r[col.distance]),
+      lower(distanceKey(r[col.distance])),
       lower(r[col.date]),
       lower(r[col.race]),
       lower(r[col.sex]),
@@ -164,22 +170,40 @@ export function mountHeadToHead(root){
 
       if(!riderToEvents.has(name)) riderToEvents.set(name, new Set());
       riderToEvents.get(name).add(k);
+
+      const rk = toNumber(r[col.ranking]);
+      if(rk != null){
+        if(!eventToRankByRider.has(k)) eventToRankByRider.set(k, new Map());
+        // If duplicates happen, keep best (lowest)
+        const m = eventToRankByRider.get(k);
+        const prev = m.get(name);
+        if(prev == null || rk < prev) m.set(name, rk);
+      }
     }
 
-    return { eventToRiders, riderToEvents };
+    return { eventToRiders, riderToEvents, eventToRankByRider };
   }
 
+  // Rider KPIs from rows (respecting current filters)
   function kpisFor(name, rows){
     const rRows = rows.filter(r => norm(r[col.rider]) === name);
-    const rk = rRows.map(r => toNumber(r[col.ranking])).filter(n => n != null);
+    const ranks = rRows.map(r => toNumber(r[col.ranking])).filter(n => n != null);
 
     const starts = rRows.length;
-    const wins = rk.filter(n => n === 1).length;
-    const podiums = rk.filter(n => n <= 3).length;
-    const avg = rk.length ? rk.reduce((a,b)=>a+b,0) / rk.length : null;
-    const best = rk.length ? Math.min(...rk) : null;
+    const gold = ranks.filter(n => n === 1).length;
+    const silver = ranks.filter(n => n === 2).length;
+    const bronze = ranks.filter(n => n === 3).length;
+    const podiums = ranks.filter(n => n <= 3).length;
+    const avg = ranks.length ? ranks.reduce((a,b)=>a+b,0) / ranks.length : null;
+    const best = ranks.length ? Math.min(...ranks) : null;
 
-    return { starts, wins, podiums, avg, best };
+    const wkMedals = rRows.filter(r => tournamentType(r[col.competition]) === "WK")
+      .map(r => toNumber(r[col.ranking])).filter(n => n != null && n <= 3).length;
+
+    const osMedals = rRows.filter(r => tournamentType(r[col.competition]) === "OS")
+      .map(r => toNumber(r[col.ranking])).filter(n => n != null && n <= 3).length;
+
+    return { starts, gold, silver, bronze, podiums, avg, best, wkMedals, osMedals };
   }
 
   function meetingsFor(name, chosen, idx){
@@ -205,6 +229,82 @@ export function mountHeadToHead(root){
     return c;
   }
 
+  function pairwiseStats(chosen, idx){
+    // For each pair (A,B): count shared events and who ranked ahead more often
+    const pairs = [];
+    for(let i=0;i<chosen.length;i++){
+      for(let j=i+1;j<chosen.length;j++){
+        const a = chosen[i], b = chosen[j];
+        let meetings = 0, aAhead = 0, bAhead = 0, ties = 0, unknown = 0;
+
+        // iterate smaller set of events to be efficient
+        const ea = idx.riderToEvents.get(a) || new Set();
+        const eb = idx.riderToEvents.get(b) || new Set();
+        const base = ea.size <= eb.size ? ea : eb;
+        const other = ea.size <= eb.size ? eb : ea;
+
+        for(const k of base){
+          if(!other.has(k)) continue;
+          meetings += 1;
+
+          const ranks = idx.eventToRankByRider.get(k);
+          const ra = ranks ? ranks.get(a) : null;
+          const rb = ranks ? ranks.get(b) : null;
+
+          if(ra == null || rb == null){
+            unknown += 1;
+            continue;
+          }
+          if(ra < rb) aAhead += 1;
+          else if(rb < ra) bAhead += 1;
+          else ties += 1;
+        }
+
+        pairs.push({ a, b, meetings, aAhead, bAhead, ties, unknown });
+      }
+    }
+    return pairs.sort((x,y)=>y.meetings - x.meetings);
+  }
+
+  // Distance buttons (multi-select) + All toggle
+  function toggleDistance(k){
+    if(state.distances.has(k)) state.distances.delete(k);
+    else state.distances.add(k);
+    renderDistanceButtons();
+    renderAll();
+  }
+
+  function renderDistanceButtons(){
+    clear(distanceRow);
+
+    const row = el("div", { class:"row", style:"gap:10px; flex-wrap:wrap; align-items:flex-end;" });
+    const label = el("div", { class:"muted", style:"font-size:12px; margin:0 0 6px 2px; font-weight:800" }, "Afstanden");
+
+    const allActive = availableDistKeys.length > 0 && availableDistKeys.every(k => state.distances.has(k));
+    const btnAll = el("button", { class:"btn", type:"button", style:"padding:8px 10px; border-radius:14px; font-weight:800;" }, "All");
+    btnAll.classList.toggle("btn--primary", allActive);
+    btnAll.addEventListener("click", ()=>{
+      if(allActive) availableDistKeys.forEach(k => state.distances.delete(k));
+      else availableDistKeys.forEach(k => state.distances.add(k));
+      renderDistanceButtons();
+      renderAll();
+    });
+
+    const btnWrap = el("div", { class:"row", style:"gap:10px; flex-wrap:wrap;" });
+    btnWrap.appendChild(btnAll);
+
+    availableDistKeys.forEach(k => {
+      const b = el("button", { class:"btn", type:"button", style:"padding:8px 10px; border-radius:14px; font-weight:800;" }, k);
+      b.classList.toggle("btn--primary", state.distances.has(k));
+      b.addEventListener("click", ()=>toggleDistance(k));
+      btnWrap.appendChild(b);
+    });
+
+    distanceRow.appendChild(el("div", { style:"min-width:140px;" }, label));
+    distanceRow.appendChild(btnWrap);
+  }
+
+  // Rider selectors
   function renderSelectors(){
     clear(selectorsWrap);
     for(let i=0;i<count;i++){
@@ -218,6 +318,23 @@ export function mountHeadToHead(root){
       selectorsWrap.appendChild(sel.el);
     }
   }
+
+  // Metrics / Data picker
+  const METRICS = [
+    { key:"gold",     label:"🥇 Goud (pos 1)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"silver",   label:"🥈 Zilver (pos 2)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"bronze",   label:"🥉 Brons (pos 3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"podiums",  label:"Podiums (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"wkMedals", label:"WK medailles (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"osMedals", label:"OS medailles (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"meetings", label:"Tegen elkaar gereden", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"starts",   label:"Starts / rijen", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"avg",      label:"Gem. ranking", lowerBetter:true, fmt:(v)=> v == null ? "—" : Number(v).toFixed(2) },
+    { key:"best",     label:"Beste ranking", lowerBetter:true, fmt:(v)=> v == null ? "—" : String(v) },
+  ];
+
+  // Default selection requested
+  const selectedMetrics = new Set(["gold","podiums","meetings","wkMedals","osMedals"]);
 
   function metricPill(metricKey){
     const def = METRICS.find(m => m.key === metricKey);
@@ -279,10 +396,9 @@ export function mountHeadToHead(root){
     ]));
   }
 
-  function renderTable(){
+  function renderMainTable(chosen, rows, idx){
     clear(tableWrap);
 
-    const chosen = selected.slice(0,count).filter(Boolean);
     if(chosen.length === 0){
       tableWrap.appendChild(el("div", { class:"notice" }, "Selecteer één of meer rijders om te vergelijken."));
       return;
@@ -294,15 +410,13 @@ export function mountHeadToHead(root){
       return;
     }
 
-    const rows = getFilteredRows();
-    const idx = buildIndexes(rows);
-
     const stats = chosen.map(n => {
       const base = kpisFor(n, rows);
       const meetings = meetingsFor(n, chosen, idx);
       return { name:n, meetings, ...base };
     });
 
+    // Ranges for highlighting
     const ranges = {};
     for(const key of activeMetricKeys){
       const vals = stats.map(s => s[key]).filter(v => v != null);
@@ -311,11 +425,11 @@ export function mountHeadToHead(root){
 
     const defs = activeMetricKeys.map(k => METRICS.find(m => m.key === k)).filter(Boolean);
 
-    // Context line to show current filters
-    const parts = [];
-    if(state.competition) parts.push(state.competition);
-    if(state.distance) parts.push(state.distance);
-    const ctx = parts.length ? parts.join(" | ") : "Alle data";
+    // Context line
+    const ctxParts = [];
+    if(state.competition) ctxParts.push(state.competition);
+    if(state.distances.size) ctxParts.push(Array.from(state.distances).join(" / "));
+    const ctx = ctxParts.length ? ctxParts.join(" | ") : "Alle data";
     tableWrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:800; opacity:.9; margin-bottom:8px" }, ctx));
 
     tableWrap.appendChild(el("table", { class:"table" }, [
@@ -338,19 +452,65 @@ export function mountHeadToHead(root){
     ]));
   }
 
-  function renderAll(){
-    renderDataPicker();
-    renderTable();
+  function renderPairwise(pairs){
+    clear(pairWrap);
+
+    if(pairs.length === 0) return;
+
+    pairWrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:900; margin: 6px 0 10px;" },
+      "Head-to-head: wie eindigde vaker voor wie"
+    ));
+
+    pairWrap.appendChild(el("table", { class:"table" }, [
+      el("thead", {}, el("tr", {}, [
+        el("th", {}, "Duel"),
+        el("th", {}, "Samen gereden"),
+        el("th", {}, "A vóór B"),
+        el("th", {}, "B vóór A"),
+        el("th", {}, "Gelijk"),
+        el("th", {}, "Onbekend"),
+      ])),
+      el("tbody", {}, pairs.map(p => {
+        const duel = `${p.a} vs ${p.b}`;
+        // best highlight: bigger of aAhead/bAhead
+        const aBest = p.aAhead > p.bAhead;
+        const bBest = p.bAhead > p.aAhead;
+        return el("tr", {}, [
+          el("td", {}, duel),
+          el("td", {}, String(p.meetings)),
+          el("td", { style: aBest ? "font-weight:900; border-bottom-color: rgba(82,232,232,.35)" : "" }, String(p.aAhead)),
+          el("td", { style: bBest ? "font-weight:900; border-bottom-color: rgba(82,232,232,.35)" : "" }, String(p.bAhead)),
+          el("td", {}, String(p.ties)),
+          el("td", {}, String(p.unknown)),
+        ]);
+      }))
+    ]));
   }
 
-  // Top filters row
-  clear(topFilters);
-  topFilters.appendChild(competitionSel.el);
-  topFilters.appendChild(distanceSel.el);
-  topFilters.appendChild(countSel.el);
-  // empty filler so it aligns nicely in grid--4
-  topFilters.appendChild(el("div", {}));
+  function renderAll(){
+    renderDataPicker();
 
+    const chosen = selected.slice(0,count).filter(Boolean);
+    const rows = getFilteredRows();
+    const idx = buildIndexes(rows);
+
+    renderMainTable(chosen, rows, idx);
+
+    if(chosen.length >= 2){
+      renderPairwise(pairwiseStats(chosen, idx));
+    } else {
+      clear(pairWrap);
+    }
+  }
+
+  // Build top layout
+  clear(topRow);
+  topRow.appendChild(competitionSel.el);
+  topRow.appendChild(countSel.el);
+  topRow.appendChild(el("div", {}));
+  topRow.appendChild(el("div", {}));
+
+  renderDistanceButtons();
   renderSelectors();
   renderAll();
 
@@ -358,13 +518,17 @@ export function mountHeadToHead(root){
     title:"Head-to-Head",
     subtitle:"Vergelijk rijders in één oogopslag (met filters op toernooi en afstand).",
     children:[
-      topFilters,
+      topRow,
+      el("div", { style:"height:8px" }),
+      distanceRow,
       el("div", { class:"hr" }),
       selectorsWrap,
       el("div", { class:"hr" }),
       dataWrap,
       el("div", { class:"hr" }),
-      tableWrap
+      tableWrap,
+      el("div", { class:"hr" }),
+      pairWrap
     ]
   }));
 }
