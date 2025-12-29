@@ -63,13 +63,22 @@ export function mountChampions(root){
 
   const norm = (v) => String(v ?? "").trim();
   const lower = (v) => norm(v).toLowerCase();
-
   function getTypeFromWedstrijd(v){
     const s = lower(v);
-    if(s.includes("olympische spelen")) return "OS";
-    if(s.includes("wereldkampioenschap")) return "WK";
+
+    // OS (Olympische Spelen) - support Dutch/English variants
+    if(s.includes("olympische spelen") || s.includes("olympic games") || s.includes("olympics") || s.includes("olympic") || s.includes("olymp")){
+      return "OS";
+    }
+
+    // WK (Wereldkampioenschap) - support Dutch/English variants
+    if(s.includes("wereldkampioenschap") || s.includes("world championship") || s.includes("world championships") || s.includes("world champs")){
+      return "WK";
+    }
+
     return null;
   }
+
 
   function excelSerialToDate(serial){
     const n = Number(serial);
@@ -153,6 +162,27 @@ export function mountChampions(root){
   const YEAR_END = 2026;
   const OLYMPIC_YEARS = [1992, 1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022];
 
+  // Beschikbare jaren uit de data (kolom J / Seizoen), per toernooi-type
+  // Hiermee tonen we bij OS/WK alleen jaren waarvoor ook écht data bestaat.
+  const yearsByType = { OS: new Set(), WK: new Set() };
+  for(const r of rows){
+    const t = getTypeFromWedstrijd(r[col.competition]);
+    const y = getSeasonValue(r[col.season]);
+    if(!t || y == null) continue;
+    if(t === "OS") yearsByType.OS.add(y);
+    if(t === "WK") yearsByType.WK.add(y);
+  }
+
+  function availableYearsForOS(){
+    // Alleen Olympische jaren die ook in de data voorkomen
+    const ys = Array.from(yearsByType.OS).filter(y => OLYMPIC_YEARS.includes(y));
+    return ys.sort((a,b)=>a-b);
+  }
+  function availableYearsForWK(){
+    const ys = Array.from(yearsByType.WK).sort((a,b)=>a-b);
+    return ys;
+  }
+
   const state = {
     types: new Set(),
     years: new Set(),
@@ -216,15 +246,48 @@ export function mountChampions(root){
     gType.appendChild(group("Toernooi", row));
   }
 
-  function yearButtonsRange(){
+    function yearButtonsRange(){
     const hasWK = state.types.has("WK");
     const hasOS = state.types.has("OS");
 
     const years = new Set();
 
+    const osYears = availableYearsForOS();
+    const wkYears = availableYearsForWK();
+
+    // Als OS geselecteerd is: alleen OS-jaren die in de data staan (en Olympisch jaar zijn)
     if(hasOS){
-      OLYMPIC_YEARS.forEach(y => years.add(y));
+      osYears.forEach(y => years.add(y));
     }
+
+    // Als WK geselecteerd is: alleen WK-jaren die in de data staan
+    if(hasWK){
+      wkYears.forEach(y => years.add(y));
+    }
+
+    // Als niets geselecteerd is: toon alle beschikbare jaren voor OS en WK (uit de data)
+    if(!hasOS && !hasWK){
+      osYears.forEach(y => years.add(y));
+      wkYears.forEach(y => years.add(y));
+
+      // fallback als dataset (nog) geen OS/WK bevat, houd dan oude default ranges aan
+      if(years.size === 0){
+        OLYMPIC_YEARS.forEach(y => years.add(y));
+        for(let y = DEFAULT_YEAR_START; y <= YEAR_END; y++) years.add(y);
+      }
+    }
+
+    // Als OS of WK geselecteerd is maar er is geen data gevonden, val terug op de vaste ranges
+    if((hasOS || hasWK) && years.size === 0){
+      if(hasOS) OLYMPIC_YEARS.forEach(y => years.add(y));
+      if(hasWK){
+        for(let y = DEFAULT_YEAR_START; y <= YEAR_END; y++) years.add(y);
+      }
+    }
+
+    return Array.from(years).sort((a,b)=>a-b);
+  }
+
 
     // If WK selected OR nothing selected yet, include default WK range
     const includeWKRange = hasWK || state.types.size === 0;
