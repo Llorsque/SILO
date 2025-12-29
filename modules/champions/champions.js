@@ -167,20 +167,6 @@ export function mountChampions(root){
     return ys.length ? Math.max(...ys) : null;
   }
 
-    const s = norm(v);
-    const d = new Date(s);
-    if(!Number.isNaN(d.getTime())){
-      const y = d.getFullYear();
-      if(y >= 1900 && y <= 2100) return y;
-    }
-
-    const n = Number(s.replace(/[^0-9]/g,""));
-    if(Number.isFinite(n)){
-      if(n >= 1900 && n <= 2100) return n;
-      if(n >= 20000 && n <= 60000) return excelSerialToYear(n);
-    }
-    return null;
-  }
 
   function getSexValue(v){
     const s = lower(v);
