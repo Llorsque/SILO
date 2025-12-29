@@ -114,8 +114,10 @@ export function mountChampions(root){
   function getSeasonValue(v){
     if(v == null || v === "") return null;
 
+    // If it's a real Date
     if(v instanceof Date && !Number.isNaN(v.getTime())) return v.getFullYear();
 
+    // Numbers: either a plain year or an Excel serial that looks like a date
     if(typeof v === "number"){
       if(v >= 1900 && v <= 2100) return v;
       if(v >= 20000 && v <= 60000) return excelSerialToYear(v);
@@ -124,12 +126,22 @@ export function mountChampions(root){
     }
 
     const s = norm(v);
+
+    // Season formats like "1991/1992" or "1993-1994": take the latest 4-digit year
+    const yearMatches = s.match(/(?:19|20)\d{2}/g);
+    if(yearMatches && yearMatches.length){
+      const ys = yearMatches.map(x => Number(x)).filter(n => n >= 1900 && n <= 2100);
+      if(ys.length) return Math.max(...ys);
+    }
+
+    // Date-like strings
     const d = new Date(s);
     if(!Number.isNaN(d.getTime())){
       const y = d.getFullYear();
       if(y >= 1900 && y <= 2100) return y;
     }
 
+    // Fallback: strip digits
     const n = Number(s.replace(/[^0-9]/g,""));
     if(Number.isFinite(n)){
       if(n >= 1900 && n <= 2100) return n;
@@ -137,6 +149,7 @@ export function mountChampions(root){
     }
     return null;
   }
+
 
   function getSexValue(v){
     const s = lower(v);
