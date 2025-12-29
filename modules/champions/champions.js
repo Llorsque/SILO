@@ -66,29 +66,8 @@ export function mountChampions(root){
 
   function getTypeFromWedstrijd(v){
     const s = lower(v);
-
-    // OS (Olympische Spelen) - ondersteun varianten
-    if(
-      s.includes("olympische spelen") ||
-      s.includes("olympic games") ||
-      s.includes("olympics") ||
-      (s.includes("olympic") && s.includes("games")) ||
-      s.includes("olymp")
-    ){
-      return "OS";
-    }
-
-    // WK (Wereldkampioenschap) - ondersteun varianten
-    if(
-      s.includes("wereldkampioenschap") ||
-      s.includes("world championship") ||
-      s.includes("world championships") ||
-      s.includes("world champ") ||
-      s.includes("world champs")
-    ){
-      return "WK";
-    }
-
+    if(s.includes("olympische spelen")) return "OS";
+    if(s.includes("wereldkampioenschap")) return "WK";
     return null;
   }
 
@@ -111,62 +90,32 @@ export function mountChampions(root){
     return `${da}-${m}-${y}`;
   }
 
-  function getSeasonYears(v){
-    // Kolom J (Seizoen) kan zijn:
-    // - 2022 (number/string)
-    // - "1991/1992", "1993-1994"
-    // - Excel serial (datum) zoals 33600 (≈ 1992)
-    // - andere tekst met jaartallen
-    if(v == null || v === "") return [];
+  function getSeasonValue(v){
+    if(v == null || v === "") return null;
 
-    if(v instanceof Date && !Number.isNaN(v.getTime())) return [v.getFullYear()];
-
-    const years = new Set();
-
-    const addYear = (y) => {
-      if(Number.isFinite(y) && y >= 1900 && y <= 2100) years.add(Math.trunc(y));
-    };
+    if(v instanceof Date && !Number.isNaN(v.getTime())) return v.getFullYear();
 
     if(typeof v === "number"){
-      if(v >= 1900 && v <= 2100) addYear(v);
-      else if(v >= 20000 && v <= 60000) addYear(excelSerialToYear(v));
-      else {
-        const n = Number(String(v).replace(/[^0-9]/g,""));
-        // last resort: if someone stored "1991/1992" as 19911992 (unlikely)
-        if(n >= 1900 && n <= 2100) addYear(n);
-        else if(n >= 20000 && n <= 60000) addYear(excelSerialToYear(n));
-      }
-      return Array.from(years);
+      if(v >= 1900 && v <= 2100) return v;
+      if(v >= 20000 && v <= 60000) return excelSerialToYear(v);
+      const n = Number(String(v).replace(/[^0-9]/g,""));
+      return Number.isFinite(n) ? n : null;
     }
 
     const s = norm(v);
-
-    // Date parse fallback
     const d = new Date(s);
     if(!Number.isNaN(d.getTime())){
-      addYear(d.getFullYear());
+      const y = d.getFullYear();
+      if(y >= 1900 && y <= 2100) return y;
     }
 
-    // Extract all 4-digit years (19xx/20xx)
-    const matches = s.match(/(?:19|20)\d{2}/g) || [];
-    matches.forEach(t => addYear(Number(t)));
-
-    // Also handle pure digits like "2022"
     const n = Number(s.replace(/[^0-9]/g,""));
     if(Number.isFinite(n)){
-      if(n >= 1900 && n <= 2100) addYear(n);
-      else if(n >= 20000 && n <= 60000) addYear(excelSerialToYear(n));
+      if(n >= 1900 && n <= 2100) return n;
+      if(n >= 20000 && n <= 60000) return excelSerialToYear(n);
     }
-
-    return Array.from(years);
+    return null;
   }
-
-  function getSeasonValue(v){
-    // Voor weergave/sortering: pak het hoogste gevonden jaartal (1991/1992 -> 1992)
-    const ys = getSeasonYears(v);
-    return ys.length ? Math.max(...ys) : null;
-  }
-
 
   function getSexValue(v){
     const s = lower(v);
@@ -236,7 +185,6 @@ export function mountChampions(root){
   const gYear = el("div", {});
   const gDist = el("div", {});
   const gSex = el("div", {});
-  const gRider = el("div", {});
   const gMedal = el("div", {});
 
   // Rijder dropdown options (uit kolom C / Naam)
@@ -334,20 +282,22 @@ export function mountChampions(root){
     gSex.appendChild(group("Sekse", row));
   }
 
-  function renderRiderDropdown(){
-    clear(gRider);
-    gRider.appendChild(group("Rijder", riderSelect.el, 240));
-  }
-
   function renderMedalButtons(){
     clear(gMedal);
-    const row = el("div", { class:"row", style:"gap:10px;" });
+
+    const medalRow = el("div", { class:"row", style:"gap:10px; flex-wrap:wrap;" });
     [["goud","🥇"],["zilver","🥈"],["brons","🥉"]].forEach(([m, icon]) => {
-      row.appendChild(toggleBtn(`${icon} ${m.charAt(0).toUpperCase()+m.slice(1)}`, () => state.medals.has(m), () => {
+      medalRow.appendChild(toggleBtn(`${icon} ${m.charAt(0).toUpperCase()+m.slice(1)}`, () => state.medals.has(m), () => {
         if(state.medals.has(m)) state.medals.delete(m); else state.medals.add(m);
       }).el);
     });
-    gMedal.appendChild(group("Medailles", row));
+
+    // Rijder hoort bij medailles: plaats dropdown in hetzelfde vak
+    const col = el("div", { style:"display:flex; flex-direction:column; gap:12px;" });
+    col.appendChild(group("Rijder", riderSelect.el, 320));
+    col.appendChild(group("Medailles", medalRow, 140));
+
+    gMedal.appendChild(col);
   }
 
   function applyFiltersRaw(opts = { includeMedalFilter: true }){
@@ -361,12 +311,8 @@ export function mountChampions(root){
       const t = getTypeFromWedstrijd(r[col.competition]);
       if(!t || !types.has(t)) return false;
 
-      const ys = getSeasonYears(r[col.season]);
-      if(state.years.size){
-        if(!ys.length) return false;
-        const ok = ys.some(y => state.years.has(y));
-        if(!ok) return false;
-      }
+      const y = getSeasonValue(r[col.season]);
+      if(state.years.size && !state.years.has(y)) return false;
 
       const dist = getDistanceKey(r[col.distance]);
       if(state.distances.size && !state.distances.has(dist)) return false;
@@ -653,7 +599,6 @@ export function mountChampions(root){
   renderYearButtons();
   renderDistanceButtons();
   renderSexButtons();
-  renderRiderDropdown();
   renderMedalButtons();
 
   const divider = () => el("div", { style:"width:1px; background: rgba(255,255,255,.10); align-self:stretch; border-radius:1px;" });
@@ -666,7 +611,7 @@ export function mountChampions(root){
 const filtersGrid = el("div", {
   style:[
     "display:grid",
-    "grid-template-columns: auto 10px auto 10px auto 10px auto 10px 320px 10px auto",
+    "grid-template-columns: auto 10px auto 10px auto 10px auto 10px 360px",
     "align-items:start",
     "column-gap: 0px",
     "row-gap: 10px",
@@ -683,8 +628,6 @@ filtersGrid.appendChild(gDist);
 filtersGrid.appendChild(divider());
 filtersGrid.appendChild(gSex);
 filtersGrid.appendChild(divider());
-filtersGrid.appendChild(gRider);
-filtersGrid.appendChild(divider());
 filtersGrid.appendChild(gMedal);
 
 // Row 2: medal summary under Afstand + Sekse (including the divider column between them)
@@ -693,147 +636,22 @@ summaryBox.style.marginTop = "2px";
 summaryBox.style.padding = "0";
 
 const btnReset = el("button", { class:"btn", type:"button" }, "Reset");
-  btnReset.addEventListener("click", reset);
+btnReset.addEventListener("click", reset);
 
-  // Layout edit (drag & drop) — veilig: alleen de volgorde van 3 bestaande blokken.
-  const btnEdit = el("button", { class:"btn", type:"button" }, "Aanpassen");
-  const LAYOUT_KEY = "silo.champions.layout.v1";
-  const DEFAULT_LAYOUT = ["filters", "summary", "table"];
-  let editMode = false;
+const card = sectionCard({
+  title:"Kampioenen",
+  subtitle:"Toont einduitslagen (Final A/Final) en 1 unieke medaille per categorie.",
+  children:[
+    el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnReset]),
+    el("div", { class:"hr" }),
+    filtersGrid,
+    // medal summary now lives visually under Afstand + Sekse
+    summaryBox,
+    el("div", { class:"hr" }),
+    out
+  ]
+});
 
-  function loadLayout(){
-    try{
-      const raw = localStorage.getItem(LAYOUT_KEY);
-      const arr = raw ? JSON.parse(raw) : null;
-      if(Array.isArray(arr) && arr.length){
-        const valid = arr.filter(x => DEFAULT_LAYOUT.includes(x));
-        const missing = DEFAULT_LAYOUT.filter(x => !valid.includes(x));
-        return [...valid, ...missing];
-      }
-    }catch(e){}
-    return [...DEFAULT_LAYOUT];
-  }
-
-  function saveLayout(order){
-    try{ localStorage.setItem(LAYOUT_KEY, JSON.stringify(order)); }catch(e){}
-  }
-
-  const layoutArea = el("div", { style:"display:grid; gap:12px;" });
-
-  function mkBlock(id, title, bodyNode){
-    const head = el("div", { class:"row", style:"align-items:center; gap:10px; margin:0 0 8px;" }, [
-      el("div", { class:"muted", style:"font-size:12px; font-weight:900; opacity:.9" }, title),
-      el("div", { class:"spacer" }),
-      el("div", { class:"muted", style:"font-size:12px; opacity:.7" }, editMode ? "↕ sleep" : "")
-    ]);
-
-    const wrap = el("div", {
-      "data-block": id,
-      style:[
-        "border-radius: 14px",
-        "padding: 10px",
-        "background: rgba(255,255,255,.03)",
-        editMode ? "outline: 1px dashed rgba(82,232,232,.35)" : "outline: none"
-      ].join(";")
-    });
-
-    wrap.appendChild(head);
-    wrap.appendChild(bodyNode);
-
-    const setDnD = () => {
-      if(!editMode){
-        wrap.removeAttribute("draggable");
-        wrap.ondragstart = null;
-        wrap.ondragend = null;
-        wrap.ondragover = null;
-        wrap.ondragleave = null;
-        wrap.ondrop = null;
-        return;
-      }
-
-      wrap.setAttribute("draggable", "true");
-      head.style.cursor = "grab";
-
-      wrap.ondragstart = (e) => {
-        e.dataTransfer.setData("text/plain", id);
-        wrap.style.opacity = ".55";
-      };
-      wrap.ondragend = () => {
-        wrap.style.opacity = "1";
-        wrap.style.outline = "1px dashed rgba(82,232,232,.35)";
-      };
-      wrap.ondragover = (e) => {
-        e.preventDefault();
-        wrap.style.outline = "2px solid rgba(82,232,232,.35)";
-      };
-      wrap.ondragleave = () => {
-        wrap.style.outline = "1px dashed rgba(82,232,232,.35)";
-      };
-      wrap.ondrop = (e) => {
-        e.preventDefault();
-        const from = e.dataTransfer.getData("text/plain");
-        const to = id;
-        if(!from || from === to) return;
-
-        const order = loadLayout();
-        const a = order.indexOf(from);
-        const b = order.indexOf(to);
-        if(a === -1 || b === -1) return;
-
-        order.splice(a, 1);
-        order.splice(b, 0, from);
-        saveLayout(order);
-        renderLayout();
-      };
-    };
-
-    setDnD();
-    return { wrap, setDnD, head };
-  }
-
-  // Build blocks (body nodes stay the same references used in refresh())
-  const blockFilters = mkBlock("filters", "Filters", filtersGrid);
-  const blockSummary = mkBlock("summary", "Medailles", summaryBox);
-  const blockTable = mkBlock("table", "Uitslagen", out);
-
-  function renderLayout(){
-    clear(layoutArea);
-
-    if(editMode){
-      layoutArea.appendChild(el("div", { class:"notice", style:"margin:0" },
-        "Aanpassen staat aan: sleep de vakken om je eigen indeling te maken. Deze indeling wordt opgeslagen op dit apparaat."
-      ));
-    }
-
-    const order = loadLayout();
-    const map = { filters:blockFilters, summary:blockSummary, table:blockTable };
-    order.forEach(id => {
-      if(map[id]){
-        map[id].setDnD();
-        layoutArea.appendChild(map[id].wrap);
-      }
-    });
-  }
-
-  btnEdit.addEventListener("click", ()=>{
-    editMode = !editMode;
-    btnEdit.textContent = editMode ? "Klaar" : "Aanpassen";
-    renderLayout();
-  });
-
-  // First render
-  renderLayout();
-
-  const card = sectionCard({
-    title:"Kampioenen",
-    subtitle:"Toont einduitslagen (Final A/Final) en 1 unieke medaille per categorie.",
-    children:[
-      el("div", { class:"row" }, [pill, el("div", { class:"spacer" }), btnEdit, btnReset]),
-      el("div", { class:"hr" }),
-      layoutArea
-    ]
-  });
-
-  root.appendChild(card);
-  refresh();
+root.appendChild(card);
+refresh();
 }
