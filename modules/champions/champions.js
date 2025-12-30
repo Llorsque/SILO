@@ -1,6 +1,6 @@
 import { el, clear } from "../../core/dom.js";
 import { sectionCard } from "../../core/layout.js";
-import { loadDataset, getMappingWithFallback } from "../../core/storage.js";
+import { loadDataset, loadMeta, getMappingWithFallback } from "../../core/storage.js";
 import { toNumber } from "../../core/utils.js";
 import { createSearchableSelect } from "../../core/components/searchableSelect.js";
 
@@ -46,6 +46,102 @@ export function mountChampions(root){
     location:    pick("Locatie",   map.location),
     date:        pick("Datum",     map.date),
   };
+
+  // --- Data controle (kolommen + voorbeeldregel) ---
+  const meta = loadMeta?.() || null;
+  const colsDetected = cols;
+  const expected = [
+    { key:"Race", label:"A: Race" },
+    { key:"Ranking", label:"B: Ranking" },
+    { key:"Naam", label:"C: Naam" },
+    { key:"Nat.", label:"D: Nat." },
+    { key:"Opmerking", label:"E: Opmerking" },
+    { key:"Wedstrijd", label:"F: Wedstrijd" },
+    { key:"Locatie", label:"G: Locatie" },
+    { key:"Afstand", label:"H: Afstand" },
+    { key:"Datum", label:"I: Datum" },
+    { key:"Seizoen", label:"J: Seizoen" },
+    { key:"Sekse", label:"K: Sekse" },
+    { key:"winnaar", label:"L: winnaar" },
+  ];
+
+  const missingExpected = expected
+    .filter(e => !colsDetected.includes(e.key))
+    .map(e => e.key);
+
+  const sample = rows[0] || {};
+
+  const dataCheck = (() => {
+    const wrap = el("details", {
+      style: "border:1px solid rgba(255,255,255,.10); border-radius:14px; padding:12px; background:rgba(0,0,0,.15);"
+    });
+
+    const summary = el("summary", {
+      style:"cursor:pointer; font-weight:900; color:rgba(255,255,255,.92);"
+    }, "Data controle (results sheet + kolommen)");
+
+    const hint = el("div", { class:"muted", style:"margin-top:8px; font-size:12px; opacity:.85" },
+      "We lezen uitsluitend tabblad 'results'. Hieronder zie je welke kolommen zijn gevonden en een voorbeeld van de eerste regel."
+    );
+
+    const sheetLine = el("div", { class:"muted", style:"margin-top:10px; font-size:12px; font-weight:800" },
+      "Tabblad gebruikt: " + (meta?.sheetName || "results (verwacht)")
+    );
+
+    const warn = missingExpected.length
+      ? el("div", { class:"notice", style:"margin-top:10px" },
+          "Let op: deze kolommen missen of heten anders: " + missingExpected.join(", ") +
+          ". Dan kan filtering/OS-WK-herkenning fout gaan."
+        )
+      : el("div", { class:"muted", style:"margin-top:10px; font-size:12px; opacity:.85" },
+          "✅ Alle verwachte kolommen zijn aanwezig."
+        );
+
+    const colList = el("div", { style:"margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;" },
+      colsDetected.map(c => el("span", { class:"pill", style:"font-size:12px; padding:6px 10px;" }, c))
+    );
+
+    const mapRows = [
+      ["Race", col.race],
+      ["Ranking", col.ranking],
+      ["Naam", col.rider],
+      ["Nat.", col.nat],
+      ["Opmerking", col.note],
+      ["Wedstrijd", col.competition],
+      ["Locatie", col.location],
+      ["Afstand", col.distance],
+      ["Datum", col.date],
+      ["Seizoen", col.season],
+      ["Sekse", col.sex],
+      ["winnaar", col.winner],
+    ];
+
+    const mappingTable = el("table", { class:"table", style:"margin-top:10px" }, [
+      el("thead", {}, el("tr", {}, [
+        el("th", {}, "Veld (verwacht)"),
+        el("th", {}, "Kolomkop gevonden"),
+        el("th", {}, "Voorbeeld (eerste regel)"),
+      ])),
+      el("tbody", {}, mapRows.map(([label, key]) => el("tr", {}, [
+        el("td", {}, label),
+        el("td", {}, String(key || "—")),
+        el("td", { class:"muted", style:"font-size:12px; opacity:.85" }, String(sample?.[key] ?? "")),
+      ])))
+    ]);
+
+    wrap.appendChild(summary);
+    wrap.appendChild(hint);
+    wrap.appendChild(sheetLine);
+    wrap.appendChild(warn);
+    wrap.appendChild(el("div", { class:"hr" }));
+    wrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:900; opacity:.9; margin:6px 0" }, "Kolomkoppen gevonden"));
+    wrap.appendChild(colList);
+    wrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:900; opacity:.9; margin:12px 0 6px" }, "Mapping-check (incl. voorbeeldregel)"));
+    wrap.appendChild(mappingTable);
+
+    return wrap;
+  })();
+
 
   const missing = Object.entries(col).filter(([_, v]) => !v || !cols.includes(v)).map(([k]) => k);
   if(missing.length){
@@ -155,6 +251,8 @@ export function mountChampions(root){
 
   const state = {
     types: new Set(),
+      dataCheck,
+
     years: new Set(),
     sexes: new Set(),
     distances: new Set(),
