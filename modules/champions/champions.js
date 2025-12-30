@@ -18,7 +18,6 @@ import { createSearchableSelect } from "../../core/components/searchableSelect.j
  * - WK+OS: combinatie
  */
 export function mountChampions(root){
-  try{
   clear(root);
 
   const rows = loadDataset();
@@ -67,31 +66,8 @@ export function mountChampions(root){
 
   function getTypeFromWedstrijd(v){
     const s = lower(v);
-
-    // OS (Olympische Spelen) - NL/EN varianten + afkorting
-    if(
-      s.includes("olympische spelen") ||
-      s.includes("olympic games") ||
-      s.includes("olympics") ||
-      (s.includes("olympic") && s.includes("games")) ||
-      s === "os" || s.startsWith("os ") || s.endsWith(" os") ||
-      s.includes("olymp")
-    ){
-      return "OS";
-    }
-
-    // WK (Wereldkampioenschap) - NL/EN varianten + afkorting
-    if(
-      s.includes("wereldkampioenschap") ||
-      s.includes("world championship") ||
-      s.includes("world championships") ||
-      s.includes("world champ") ||
-      s.includes("world champs") ||
-      s === "wk" || s.startsWith("wk ") || s.endsWith(" wk")
-    ){
-      return "WK";
-    }
-
+    if(s.includes("olympische spelen")) return "OS";
+    if(s.includes("wereldkampioenschap")) return "WK";
     return null;
   }
 
@@ -114,55 +90,17 @@ export function mountChampions(root){
     return `${da}-${m}-${y}`;
   }
 
-  function getSeasonYears(v){
-    // Kolom J (Seizoen) kan zijn: 2022 of 1991/1992 of 1993-1994 (etc.)
-    if(v == null || v === "") return [];
-
-    // number: treat as year if plausible
-    if(typeof v === "number"){
-      if(v >= 1900 && v <= 2100) return [Math.trunc(v)];
-      // anders: als string verder parsen
-      v = String(v);
-    }
-
-    // date object: take year
-    if(v instanceof Date && !Number.isNaN(v.getTime())){
-      const y = v.getFullYear();
-      return (y >= 1900 && y <= 2100) ? [y] : [];
-    }
-
-    const s = norm(v);
-    if(!s) return [];
-
-    // Extract all 4-digit years
-    const matches = s.match(/(?:19|20)\d{2}/g) || [];
-    const years = matches
-      .map(t => Number(t))
-      .filter(n => Number.isFinite(n) && n >= 1900 && n <= 2100);
-
-    if(years.length) return Array.from(new Set(years));
-
-    // Fallback: digits-only
-    const n = Number(s.replace(/[^0-9]/g, ""));
-    if(Number.isFinite(n) && n >= 1900 && n <= 2100) return [n];
-
-    return [];
-  }
-
   function getSeasonValue(v){
-    // Display/dedupe year: neem het hoogste jaar (1991/1992 -> 1992)
-    const ys = getSeasonYears(v);
-    return ys.length ? Math.max(...ys) : null;
-  }
+    if(v == null || v === "") return null;
 
-  function seasonMatchesYearSet(seasonVal, yearsSet){
-    // Lege set = geen filter (alles)
-    if(!yearsSet || yearsSet.size === 0) return true;
-    const ys = getSeasonYears(seasonVal);
-    if(!ys.length) return false;
-    return ys.some(y => yearsSet.has(y));
-  }
+    if(v instanceof Date && !Number.isNaN(v.getTime())) return v.getFullYear();
 
+    if(typeof v === "number"){
+      if(v >= 1900 && v <= 2100) return v;
+      if(v >= 20000 && v <= 60000) return excelSerialToYear(v);
+      const n = Number(String(v).replace(/[^0-9]/g,""));
+      return Number.isFinite(n) ? n : null;
+    }
 
     const s = norm(v);
     const d = new Date(s);
@@ -373,7 +311,8 @@ export function mountChampions(root){
       const t = getTypeFromWedstrijd(r[col.competition]);
       if(!t || !types.has(t)) return false;
 
-      if(!seasonMatchesYearSet(r[col.season], state.years)) return false;
+      const y = getSeasonValue(r[col.season]);
+      if(state.years.size && !state.years.has(y)) return false;
 
       const dist = getDistanceKey(r[col.distance]);
       if(state.distances.size && !state.distances.has(dist)) return false;
@@ -715,17 +654,4 @@ const card = sectionCard({
 
 root.appendChild(card);
 refresh();
-  }catch(e){
-    console.error("[SILO] Kampioenen module crash:", e);
-    clear(root);
-    root.appendChild(sectionCard({
-      title:"Kampioenen",
-      subtitle:"Er ging iets mis bij het renderen van deze pagina.",
-      children:[
-        el("div", { class:"notice" }, "Open de browserconsole voor details. Dit is een veilige foutmelding zodat de site niet leeg blijft."),
-        el("pre", { style:"white-space:pre-wrap; font-size:12px; opacity:.85; margin-top:10px;" }, String(e && (e.stack || e.message || e)))
-      ]
-    }));
-  }
-
 }

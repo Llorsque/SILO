@@ -59,7 +59,6 @@ export function mountDashboard(root){
   }
 
   const norm = (v) => String(v ?? "").trim();
-  const normLower = (v) => norm(v).toLowerCase();
 
   function parseYear(v){
     const s = norm(v);
@@ -80,7 +79,7 @@ export function mountDashboard(root){
     competition: new Set(),
     location: new Set(),
     distance: new Set(),
-    sex: new Set(),     // lowercase: 'man','vrouw'
+    sex: new Set(),
     season: new Set(),
     winner: new Set(),
     nat: new Set(),
@@ -91,6 +90,7 @@ export function mountDashboard(root){
   const competitions = uniqSorted(allRows.map(r => r[col.competition]));
   const locations    = uniqSorted(allRows.map(r => r[col.location]));
   const distances    = uniqSorted(allRows.map(r => r[col.distance]));
+  const sexes        = uniqSorted(allRows.map(r => r[col.sex]));
   const seasons      = uniqSorted(allRows.map(r => r[col.season]));
   const winners      = uniqSorted(allRows.map(r => r[col.winner]));
   const nats         = uniqSorted(allRows.map(r => r[col.nat]));
@@ -107,10 +107,7 @@ export function mountDashboard(root){
       if(state.competition.size && !state.competition.has(norm(r[col.competition]))) return false;
       if(state.location.size    && !state.location.has(norm(r[col.location]))) return false;
       if(state.distance.size    && !state.distance.has(norm(r[col.distance]))) return false;
-      if(state.sex.size){
-        const sx = normLower(r[col.sex]); // case-insensitive
-        if(!state.sex.has(sx)) return false;
-      }
+      if(state.sex.size         && !state.sex.has(norm(r[col.sex]))) return false;
       if(state.season.size      && !state.season.has(norm(r[col.season]))) return false;
       if(state.winner.size      && !state.winner.has(norm(r[col.winner]))) return false;
       if(state.nat.size         && !state.nat.has(norm(r[col.nat]))) return false;
@@ -212,32 +209,13 @@ export function mountDashboard(root){
     allLabel:"Alle afstanden",
     onChange:(vals)=>{ state.distance = new Set(vals.map(norm)); refresh(); }
   });
-
-  // Sekse: 2 toggle buttons (case-insensitive)
-  const sexLabel = el("div", { class:"muted", style:"font-size:12px; margin:0 0 6px 2px; font-weight:800" }, "Sekse");
-  const btnMan = el("button", { class:"toggleBtn", type:"button" }, "Man");
-  const btnVrouw = el("button", { class:"toggleBtn", type:"button" }, "Vrouw");
-
-  function syncSexUI(){
-    btnMan.classList.toggle("toggleBtn--active", state.sex.has("man"));
-    btnVrouw.classList.toggle("toggleBtn--active", state.sex.has("vrouw"));
-  }
-  function toggleSex(val){
-    const v = String(val).toLowerCase();
-    if(state.sex.has(v)) state.sex.delete(v);
-    else state.sex.add(v);
-    syncSexUI();
-    refresh();
-  }
-  btnMan.addEventListener("click", () => toggleSex("man"));
-  btnVrouw.addEventListener("click", () => toggleSex("vrouw"));
-  syncSexUI();
-
-  const sexBlock = el("div", {}, [
-    sexLabel,
-    el("div", { class:"toggleRow" }, [btnMan, btnVrouw])
-  ]);
-
+  const fSex = createSearchableMultiSelect({
+    label:"Sekse",
+    options: sexes.map(v => ({ value:v, label:v })),
+    values: [],
+    allLabel:"Alle",
+    onChange:(vals)=>{ state.sex = new Set(vals.map(norm)); refresh(); }
+  });
   const fSeason = createSearchableMultiSelect({
     label:"Seizoen",
     options: seasons.map(v => ({ value:v, label:v })),
@@ -281,14 +259,7 @@ export function mountDashboard(root){
     subtitle:"Multi-select • Leeg = alles",
     children:[
       el("div", { class:"filtersStack" }, [
-        fYear.el,
-        fComp.el,
-        fLoc.el,
-        fDist.el,
-        sexBlock,
-        fSeason.el,
-        fWinner.el,
-        fNat.el,
+        fYear.el, fComp.el, fLoc.el, fDist.el, fSex.el, fSeason.el, fWinner.el, fNat.el,
         el("div", { class:"row" }, [btnReset]),
       ])
     ]
@@ -297,7 +268,7 @@ export function mountDashboard(root){
 
   const main = sectionCard({
     title:"Dashboard",
-    subtitle:"Tiles volgen je filters.",
+    subtitle:"Tiles volgen je filters (bron: tabblad 'results').",
     children:[
       el("div", { class:"row" }, [infoPill]),
       el("div", { class:"hr" }),

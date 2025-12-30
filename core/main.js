@@ -10,9 +10,7 @@ import { mountOverview } from "../modules/overview/overview.js";
 import { mountSettings } from "../modules/settings/settings.js";
 
 const root = document.getElementById("appRoot");
-
 document.getElementById("btnGoHome").addEventListener("click", () => router.go("home"));
-document.getElementById("btnSettings").addEventListener("click", () => router.go("settings"));
 
 router.register("home", () => mountHome(root));
 router.register("dashboard", () => mountDashboard(root));

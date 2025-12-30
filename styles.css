@@ -137,10 +137,3 @@ body{
 .searchable__item:hover{background: rgba(82,232,232,.08)}
 .searchable__item--active{background: rgba(82,232,232,.12)}
 .searchable__empty{padding:12px;color:var(--muted);font-size:13px}
-/* --- SILO: Head-to-Head additions --- */
-.grid--4{grid-template-columns:repeat(4,minmax(0,1fr))}
-@media (max-width:1100px){.grid--4{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:560px){.grid--4{grid-template-columns:repeat(1,minmax(0,1fr))}}
-
-.pill--clickable{background:rgba(255,255,255,.02)}
-.pill--clickable:hover{background:rgba(255,255,255,.06)}

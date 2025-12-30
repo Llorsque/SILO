@@ -1,4 +1,4 @@
-import { saveDataset, saveMeta } from "./storage.js";
+import { saveDataset } from "./storage.js";
 
 function findSheetName(wb, preferred){
   const names = wb.SheetNames || [];
@@ -27,25 +27,6 @@ export async function importExcelFile(file){
   if(!ws) throw new Error("Geen tabblad gevonden om te importeren (verwacht: 'results').");
 
   const rows = XLSX.utils.sheet_to_json(ws, { defval:"" });
-
-
-  // --- Data controle meta (voor debugging / kolommapping) ---
-  const columns = rows && rows.length ? Object.keys(rows[0] || {}) : [];
-  const expected = ["Race","Ranking","Naam","Nat.","Opmerking","Wedstrijd","Locatie","Afstand","Datum","Seizoen","Sekse","winnaar"];
-  const missingColumns = expected.filter(c => !columns.includes(c));
-
-  try{
-    saveMeta({
-      sheetName,
-      rowCount: rows.length,
-      columns,
-      missingColumns,
-      importedAt: new Date().toISOString()
-    });
-  }catch(e){
-    // meta is best-effort; import must still succeed
-  }
-
 
   await saveDataset(rows);
   return rows;
