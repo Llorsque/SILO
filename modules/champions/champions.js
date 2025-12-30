@@ -1,6 +1,6 @@
 import { el, clear } from "../../core/dom.js";
 import { sectionCard } from "../../core/layout.js";
-import { loadDataset, loadMeta, getMappingWithFallback } from "../../core/storage.js";
+import { loadDataset, getMappingWithFallback } from "../../core/storage.js";
 import { toNumber } from "../../core/utils.js";
 import { createSearchableSelect } from "../../core/components/searchableSelect.js";
 
@@ -18,6 +18,7 @@ import { createSearchableSelect } from "../../core/components/searchableSelect.j
  * - WK+OS: combinatie
  */
 export function mountChampions(root){
+  try{
   clear(root);
 
   const rows = loadDataset();
@@ -47,102 +48,6 @@ export function mountChampions(root){
     date:        pick("Datum",     map.date),
   };
 
-  // --- Data controle (kolommen + voorbeeldregel) ---
-  const meta = loadMeta?.() || null;
-  const colsDetected = cols;
-  const expected = [
-    { key:"Race", label:"A: Race" },
-    { key:"Ranking", label:"B: Ranking" },
-    { key:"Naam", label:"C: Naam" },
-    { key:"Nat.", label:"D: Nat." },
-    { key:"Opmerking", label:"E: Opmerking" },
-    { key:"Wedstrijd", label:"F: Wedstrijd" },
-    { key:"Locatie", label:"G: Locatie" },
-    { key:"Afstand", label:"H: Afstand" },
-    { key:"Datum", label:"I: Datum" },
-    { key:"Seizoen", label:"J: Seizoen" },
-    { key:"Sekse", label:"K: Sekse" },
-    { key:"winnaar", label:"L: winnaar" },
-  ];
-
-  const missingExpected = expected
-    .filter(e => !colsDetected.includes(e.key))
-    .map(e => e.key);
-
-  const sample = rows[0] || {};
-
-  const dataCheck = (() => {
-    const wrap = el("details", {
-      style: "border:1px solid rgba(255,255,255,.10); border-radius:14px; padding:12px; background:rgba(0,0,0,.15);"
-    });
-
-    const summary = el("summary", {
-      style:"cursor:pointer; font-weight:900; color:rgba(255,255,255,.92);"
-    }, "Data controle (results sheet + kolommen)");
-
-    const hint = el("div", { class:"muted", style:"margin-top:8px; font-size:12px; opacity:.85" },
-      "We lezen uitsluitend tabblad 'results'. Hieronder zie je welke kolommen zijn gevonden en een voorbeeld van de eerste regel."
-    );
-
-    const sheetLine = el("div", { class:"muted", style:"margin-top:10px; font-size:12px; font-weight:800" },
-      "Tabblad gebruikt: " + (meta?.sheetName || "results (verwacht)")
-    );
-
-    const warn = missingExpected.length
-      ? el("div", { class:"notice", style:"margin-top:10px" },
-          "Let op: deze kolommen missen of heten anders: " + missingExpected.join(", ") +
-          ". Dan kan filtering/OS-WK-herkenning fout gaan."
-        )
-      : el("div", { class:"muted", style:"margin-top:10px; font-size:12px; opacity:.85" },
-          "✅ Alle verwachte kolommen zijn aanwezig."
-        );
-
-    const colList = el("div", { style:"margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;" },
-      colsDetected.map(c => el("span", { class:"pill", style:"font-size:12px; padding:6px 10px;" }, c))
-    );
-
-    const mapRows = [
-      ["Race", col.race],
-      ["Ranking", col.ranking],
-      ["Naam", col.rider],
-      ["Nat.", col.nat],
-      ["Opmerking", col.note],
-      ["Wedstrijd", col.competition],
-      ["Locatie", col.location],
-      ["Afstand", col.distance],
-      ["Datum", col.date],
-      ["Seizoen", col.season],
-      ["Sekse", col.sex],
-      ["winnaar", col.winner],
-    ];
-
-    const mappingTable = el("table", { class:"table", style:"margin-top:10px" }, [
-      el("thead", {}, el("tr", {}, [
-        el("th", {}, "Veld (verwacht)"),
-        el("th", {}, "Kolomkop gevonden"),
-        el("th", {}, "Voorbeeld (eerste regel)"),
-      ])),
-      el("tbody", {}, mapRows.map(([label, key]) => el("tr", {}, [
-        el("td", {}, label),
-        el("td", {}, String(key || "—")),
-        el("td", { class:"muted", style:"font-size:12px; opacity:.85" }, String(sample?.[key] ?? "")),
-      ])))
-    ]);
-
-    wrap.appendChild(summary);
-    wrap.appendChild(hint);
-    wrap.appendChild(sheetLine);
-    wrap.appendChild(warn);
-    wrap.appendChild(el("div", { class:"hr" }));
-    wrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:900; opacity:.9; margin:6px 0" }, "Kolomkoppen gevonden"));
-    wrap.appendChild(colList);
-    wrap.appendChild(el("div", { class:"muted", style:"font-size:12px; font-weight:900; opacity:.9; margin:12px 0 6px" }, "Mapping-check (incl. voorbeeldregel)"));
-    wrap.appendChild(mappingTable);
-
-    return wrap;
-  })();
-
-
   const missing = Object.entries(col).filter(([_, v]) => !v || !cols.includes(v)).map(([k]) => k);
   if(missing.length){
     root.appendChild(sectionCard({
@@ -163,7 +68,7 @@ export function mountChampions(root){
   function getTypeFromWedstrijd(v){
     const s = lower(v);
 
-    // Olympische Spelen (OS) - NL/EN varianten + afkorting
+    // OS (Olympische Spelen) - NL/EN varianten + afkorting
     if(
       s.includes("olympische spelen") ||
       s.includes("olympic games") ||
@@ -175,12 +80,13 @@ export function mountChampions(root){
       return "OS";
     }
 
-    // Wereldkampioenschap (WK) - NL/EN varianten + afkorting
+    // WK (Wereldkampioenschap) - NL/EN varianten + afkorting
     if(
       s.includes("wereldkampioenschap") ||
       s.includes("world championship") ||
       s.includes("world championships") ||
       s.includes("world champ") ||
+      s.includes("world champs") ||
       s === "wk" || s.startsWith("wk ") || s.endsWith(" wk")
     ){
       return "WK";
@@ -209,53 +115,54 @@ export function mountChampions(root){
   }
 
   function getSeasonYears(v){
-    // Kolom J (Seizoen) kan binnenkomen als:
-    // - 2022 (number/string)
-    // - "1991/1992" of "1993-1994"
-    // - soms als Excel-serie (zeldzaam, maar afvangen)
+    // Kolom J (Seizoen) kan zijn: 2022 of 1991/1992 of 1993-1994 (etc.)
     if(v == null || v === "") return [];
 
+    // number: treat as year if plausible
+    if(typeof v === "number"){
+      if(v >= 1900 && v <= 2100) return [Math.trunc(v)];
+      // anders: als string verder parsen
+      v = String(v);
+    }
+
+    // date object: take year
     if(v instanceof Date && !Number.isNaN(v.getTime())){
       const y = v.getFullYear();
       return (y >= 1900 && y <= 2100) ? [y] : [];
     }
 
-    if(typeof v === "number"){
-      if(v >= 1900 && v <= 2100) return [Math.trunc(v)];
-      if(v >= 20000 && v <= 60000){
-        const y = excelSerialToYear(v);
-        return y ? [y] : [];
-      }
-      // fallthrough: treat as string
-      v = String(v);
-    }
-
     const s = norm(v);
     if(!s) return [];
 
-    // Extract all 4-digit years (19xx/20xx) from strings like 1991/1992
+    // Extract all 4-digit years
     const matches = s.match(/(?:19|20)\d{2}/g) || [];
-    const years = matches.map(t => Number(t)).filter(n => Number.isFinite(n) && n >= 1900 && n <= 2100);
+    const years = matches
+      .map(t => Number(t))
+      .filter(n => Number.isFinite(n) && n >= 1900 && n <= 2100);
 
     if(years.length) return Array.from(new Set(years));
 
-    // Fallback: strip digits and parse
-    const n = Number(s.replace(/[^0-9]/g,""));
-    if(Number.isFinite(n)){
-      if(n >= 1900 && n <= 2100) return [n];
-      if(n >= 20000 && n <= 60000){
-        const y = excelSerialToYear(n);
-        return y ? [y] : [];
-      }
-    }
+    // Fallback: digits-only
+    const n = Number(s.replace(/[^0-9]/g, ""));
+    if(Number.isFinite(n) && n >= 1900 && n <= 2100) return [n];
 
     return [];
   }
 
-  function seasonToDisplayYear(v){
+  function getSeasonValue(v){
+    // Display/dedupe year: neem het hoogste jaar (1991/1992 -> 1992)
     const ys = getSeasonYears(v);
     return ys.length ? Math.max(...ys) : null;
   }
+
+  function seasonMatchesYearSet(seasonVal, yearsSet){
+    // Lege set = geen filter (alles)
+    if(!yearsSet || yearsSet.size === 0) return true;
+    const ys = getSeasonYears(seasonVal);
+    if(!ys.length) return false;
+    return ys.some(y => yearsSet.has(y));
+  }
+
 
     const s = norm(v);
     const d = new Date(s);
@@ -310,8 +217,6 @@ export function mountChampions(root){
 
   const state = {
     types: new Set(),
-      dataCheck,
-
     years: new Set(),
     sexes: new Set(),
     distances: new Set(),
@@ -468,12 +373,7 @@ export function mountChampions(root){
       const t = getTypeFromWedstrijd(r[col.competition]);
       if(!t || !types.has(t)) return false;
 
-      if(state.years.size){
-        const ys = getSeasonYears(r[col.season]);
-        if(!ys.length) return false;
-        const ok = ys.some(y => state.years.has(y));
-        if(!ok) return false;
-      }
+      if(!seasonMatchesYearSet(r[col.season], state.years)) return false;
 
       const dist = getDistanceKey(r[col.distance]);
       if(state.distances.size && !state.distances.has(dist)) return false;
@@ -501,7 +401,7 @@ export function mountChampions(root){
 
     function keyOf(r){
       const t = getTypeFromWedstrijd(r[col.competition]) || "";
-      const y = seasonToDisplayYear(r[col.season]) ?? "";
+      const y = getSeasonValue(r[col.season]) ?? "";
       const dist = getDistanceKey(r[col.distance]) || "";
       const sx = getSexValue(r[col.sex]) || "";
       const medal = getMedalFromRanking(r[col.ranking]) || "";
@@ -674,8 +574,8 @@ export function mountChampions(root){
       const tb = getTypeFromWedstrijd(b[col.competition]) || "";
       if(ta !== tb) return ta.localeCompare(tb, "nl");
 
-      const ya = seasonToDisplayYear(a[col.season]) || 0;
-      const yb = seasonToDisplayYear(b[col.season]) || 0;
+      const ya = getSeasonValue(a[col.season]) || 0;
+      const yb = getSeasonValue(b[col.season]) || 0;
       if(ya !== yb) return yb - ya;
 
       const da = getDistanceKey(a[col.distance]) || "";
@@ -689,7 +589,7 @@ export function mountChampions(root){
 
     const items = sorted.map(r => {
       const tournament = getTypeFromWedstrijd(r[col.competition]) || "";
-      const year = seasonToDisplayYear(r[col.season]) ?? "";
+      const year = getSeasonValue(r[col.season]) ?? "";
       const dist = getDistanceKey(r[col.distance]) || norm(r[col.distance]);
       const medal = getMedalFromRanking(r[col.ranking]) || "";
       const pos = norm(r[col.ranking]);
@@ -815,4 +715,17 @@ const card = sectionCard({
 
 root.appendChild(card);
 refresh();
+  }catch(e){
+    console.error("[SILO] Kampioenen module crash:", e);
+    clear(root);
+    root.appendChild(sectionCard({
+      title:"Kampioenen",
+      subtitle:"Er ging iets mis bij het renderen van deze pagina.",
+      children:[
+        el("div", { class:"notice" }, "Open de browserconsole voor details. Dit is een veilige foutmelding zodat de site niet leeg blijft."),
+        el("pre", { style:"white-space:pre-wrap; font-size:12px; opacity:.85; margin-top:10px;" }, String(e && (e.stack || e.message || e)))
+      ]
+    }));
+  }
+
 }
