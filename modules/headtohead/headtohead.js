@@ -6,16 +6,17 @@ import { createSearchableSelect } from "../../core/components/searchableSelect.j
 
 /**
  * Head-to-Head (SILO)
- * - Aantal rijders: 2-4 (default 2)
- * - Toernooi: dropdown (typbaar) met ALLE unieke waarden uit kolom F (Wedstrijd)
- * - Afstand: knoppen 500m / 1000m / 1500m + Eindklassement (multi-select)
- *   - Eindklassement wordt herkend uit kolom H (Afstand) als tekst "eindklassement" of "overall".
+ * Belangrijk:
+ * - Medailles (goud/zilver/brons/podiums) tellen ALLEEN op basis van Final A.
+ *   Final A staat in kolom A (Race). Dus:
+ *   - Goud  = Ranking 1 in Final A
+ *   - Zilver= Ranking 2 in Final A
+ *   - Brons = Ranking 3 in Final A
+ *   - Podium= Ranking 1/2/3 in Final A
  *
- * Vergelijken "tegen elkaar":
- * - Omdat heats/rit-informatie ontbreekt, vergelijken we op "zelfde uitslag":
- *   - dezelfde wedstrijd + locatie + afstand + datum + race + sekse + seizoen
- *   - vervolgens vergelijken we de posities (Ranking). Lagere ranking = betere positie.
- *   - A wint als A een lagere ranking heeft dan B in diezelfde uitslag.
+ * "Tegen elkaar" (duel):
+ * - We vergelijken op "zelfde uitslag" (zelfde wedstrijd+locatie+afstand+datum+race+sekse+seizoen)
+ * - Lagere ranking = betere positie.
  */
 export function mountHeadToHead(root){
   clear(root);
@@ -62,6 +63,12 @@ export function mountHeadToHead(root){
 
   const norm = (v) => String(v ?? "").trim();
   const lower = (v) => norm(v).toLowerCase();
+
+  function isFinalA(v){
+    // kolom A (Race) kan variëren in casing: Final A, FINAL A, etc.
+    const s = lower(v);
+    return s === "final a" || s.includes("final a");
+  }
 
   function tournamentType(v){
     const s = lower(v);
@@ -179,22 +186,36 @@ export function mountHeadToHead(root){
 
   function kpisFor(name, rows){
     const rRows = rows.filter(r => norm(r[col.rider]) === name);
-    const ranks = rRows.map(r => toNumber(r[col.ranking])).filter(n => n != null);
+
+    // Final A subset for medals/podiums
+    const finalARows = rRows.filter(r => isFinalA(r[col.race]));
+    const finalARanks = finalARows.map(r => toNumber(r[col.ranking])).filter(n => n != null);
 
     const starts = rRows.length;
-    const gold = ranks.filter(n => n === 1).length;
-    const silver = ranks.filter(n => n === 2).length;
-    const bronze = ranks.filter(n => n === 3).length;
-    const podiums = ranks.filter(n => n <= 3).length;
-    const avg = ranks.length ? ranks.reduce((a,b)=>a+b,0) / ranks.length : null;
-    const best = ranks.length ? Math.min(...ranks) : null;
 
-    const wkMedals = rRows.filter(r => tournamentType(r[col.competition]) === "WK")
-      .map(r => toNumber(r[col.ranking])).filter(n => n != null && n <= 3).length;
+    // Medals ONLY from Final A
+    const gold = finalARanks.filter(n => n === 1).length;
+    const silver = finalARanks.filter(n => n === 2).length;
+    const bronze = finalARanks.filter(n => n === 3).length;
+    const podiums = finalARanks.filter(n => n <= 3).length;
 
-    const osMedals = rRows.filter(r => tournamentType(r[col.competition]) === "OS")
-      .map(r => toNumber(r[col.ranking])).filter(n => n != null && n <= 3).length;
+    // Other stats can remain based on all rows (not only Final A)
+    const allRanks = rRows.map(r => toNumber(r[col.ranking])).filter(n => n != null);
+    const avg = allRanks.length ? allRanks.reduce((a,b)=>a+b,0) / allRanks.length : null;
+    const best = allRanks.length ? Math.min(...allRanks) : null;
 
+    // WK/OS medals: also ONLY Final A medals (pos 1/2/3 in Final A)
+    const wkMedals = finalARows
+      .filter(r => tournamentType(r[col.competition]) === "WK")
+      .map(r => toNumber(r[col.ranking]))
+      .filter(n => n != null && n <= 3).length;
+
+    const osMedals = finalARows
+      .filter(r => tournamentType(r[col.competition]) === "OS")
+      .map(r => toNumber(r[col.ranking]))
+      .filter(n => n != null && n <= 3).length;
+
+    // Eindklassement gewonnen: Ranking 1 on Eindklassement (race may vary, keep as-is)
     const endWins = rRows
       .filter(r => distanceKey(r[col.distance]) === "Eindklassement")
       .map(r => toNumber(r[col.ranking]))
@@ -275,7 +296,6 @@ export function mountHeadToHead(root){
     const btnAll = el("button", { class:"btn", type:"button", style:"padding:8px 10px; border-radius:14px; font-weight:800;" }, "All");
     btnAll.classList.toggle("btn--primary", allActive);
     btnAll.addEventListener("click", ()=>{
-      // Toggle between "all implied" (empty) and "explicit all"
       if(state.distances.size === 0) state.distances = new Set(visible);
       else state.distances = new Set();
       renderDistanceButtons();
@@ -294,9 +314,6 @@ export function mountHeadToHead(root){
         } else {
           if(state.distances.has(k)) state.distances.delete(k);
           else state.distances.add(k);
-          if(state.distances.size === 0){
-            // keep empty => all
-          }
         }
         renderDistanceButtons();
         renderAll();
@@ -323,12 +340,12 @@ export function mountHeadToHead(root){
   }
 
   const METRICS = [
-    { key:"gold",     label:"🥇 Goud (pos 1)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"silver",   label:"🥈 Zilver (pos 2)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"bronze",   label:"🥉 Brons (pos 3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"podiums",  label:"Podiums (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"wkMedals", label:"WK medailles (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
-    { key:"osMedals", label:"OS medailles (≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"gold",     label:"🥇 Goud (pos 1, Final A)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"silver",   label:"🥈 Zilver (pos 2, Final A)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"bronze",   label:"🥉 Brons (pos 3, Final A)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"podiums",  label:"Podiums (≤3, Final A)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"wkMedals", label:"WK medailles (Final A, ≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
+    { key:"osMedals", label:"OS medailles (Final A, ≤3)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"endWins",  label:"Eindklassement gewonnen (pos 1)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"meetings", label:"Zelfde uitslag (met elkaar)", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
     { key:"starts",   label:"Starts / rijen", lowerBetter:false, fmt:(v)=> v == null ? "—" : String(v) },
