@@ -162,8 +162,30 @@ export function mountChampions(root){
 
   function getTypeFromWedstrijd(v){
     const s = lower(v);
-    if(s.includes("olympische spelen")) return "OS";
-    if(s.includes("wereldkampioenschap")) return "WK";
+
+    // Olympische Spelen (OS) - NL/EN varianten + afkorting
+    if(
+      s.includes("olympische spelen") ||
+      s.includes("olympic games") ||
+      s.includes("olympics") ||
+      (s.includes("olympic") && s.includes("games")) ||
+      s === "os" || s.startsWith("os ") || s.endsWith(" os") ||
+      s.includes("olymp")
+    ){
+      return "OS";
+    }
+
+    // Wereldkampioenschap (WK) - NL/EN varianten + afkorting
+    if(
+      s.includes("wereldkampioenschap") ||
+      s.includes("world championship") ||
+      s.includes("world championships") ||
+      s.includes("world champ") ||
+      s === "wk" || s.startsWith("wk ") || s.endsWith(" wk")
+    ){
+      return "WK";
+    }
+
     return null;
   }
 
@@ -186,17 +208,54 @@ export function mountChampions(root){
     return `${da}-${m}-${y}`;
   }
 
-  function getSeasonValue(v){
-    if(v == null || v === "") return null;
+  function getSeasonYears(v){
+    // Kolom J (Seizoen) kan binnenkomen als:
+    // - 2022 (number/string)
+    // - "1991/1992" of "1993-1994"
+    // - soms als Excel-serie (zeldzaam, maar afvangen)
+    if(v == null || v === "") return [];
 
-    if(v instanceof Date && !Number.isNaN(v.getTime())) return v.getFullYear();
+    if(v instanceof Date && !Number.isNaN(v.getTime())){
+      const y = v.getFullYear();
+      return (y >= 1900 && y <= 2100) ? [y] : [];
+    }
 
     if(typeof v === "number"){
-      if(v >= 1900 && v <= 2100) return v;
-      if(v >= 20000 && v <= 60000) return excelSerialToYear(v);
-      const n = Number(String(v).replace(/[^0-9]/g,""));
-      return Number.isFinite(n) ? n : null;
+      if(v >= 1900 && v <= 2100) return [Math.trunc(v)];
+      if(v >= 20000 && v <= 60000){
+        const y = excelSerialToYear(v);
+        return y ? [y] : [];
+      }
+      // fallthrough: treat as string
+      v = String(v);
     }
+
+    const s = norm(v);
+    if(!s) return [];
+
+    // Extract all 4-digit years (19xx/20xx) from strings like 1991/1992
+    const matches = s.match(/(?:19|20)\d{2}/g) || [];
+    const years = matches.map(t => Number(t)).filter(n => Number.isFinite(n) && n >= 1900 && n <= 2100);
+
+    if(years.length) return Array.from(new Set(years));
+
+    // Fallback: strip digits and parse
+    const n = Number(s.replace(/[^0-9]/g,""));
+    if(Number.isFinite(n)){
+      if(n >= 1900 && n <= 2100) return [n];
+      if(n >= 20000 && n <= 60000){
+        const y = excelSerialToYear(n);
+        return y ? [y] : [];
+      }
+    }
+
+    return [];
+  }
+
+  function seasonToDisplayYear(v){
+    const ys = getSeasonYears(v);
+    return ys.length ? Math.max(...ys) : null;
+  }
 
     const s = norm(v);
     const d = new Date(s);
@@ -409,8 +468,12 @@ export function mountChampions(root){
       const t = getTypeFromWedstrijd(r[col.competition]);
       if(!t || !types.has(t)) return false;
 
-      const y = getSeasonValue(r[col.season]);
-      if(state.years.size && !state.years.has(y)) return false;
+      if(state.years.size){
+        const ys = getSeasonYears(r[col.season]);
+        if(!ys.length) return false;
+        const ok = ys.some(y => state.years.has(y));
+        if(!ok) return false;
+      }
 
       const dist = getDistanceKey(r[col.distance]);
       if(state.distances.size && !state.distances.has(dist)) return false;
@@ -438,7 +501,7 @@ export function mountChampions(root){
 
     function keyOf(r){
       const t = getTypeFromWedstrijd(r[col.competition]) || "";
-      const y = getSeasonValue(r[col.season]) ?? "";
+      const y = seasonToDisplayYear(r[col.season]) ?? "";
       const dist = getDistanceKey(r[col.distance]) || "";
       const sx = getSexValue(r[col.sex]) || "";
       const medal = getMedalFromRanking(r[col.ranking]) || "";
@@ -611,8 +674,8 @@ export function mountChampions(root){
       const tb = getTypeFromWedstrijd(b[col.competition]) || "";
       if(ta !== tb) return ta.localeCompare(tb, "nl");
 
-      const ya = getSeasonValue(a[col.season]) || 0;
-      const yb = getSeasonValue(b[col.season]) || 0;
+      const ya = seasonToDisplayYear(a[col.season]) || 0;
+      const yb = seasonToDisplayYear(b[col.season]) || 0;
       if(ya !== yb) return yb - ya;
 
       const da = getDistanceKey(a[col.distance]) || "";
@@ -626,7 +689,7 @@ export function mountChampions(root){
 
     const items = sorted.map(r => {
       const tournament = getTypeFromWedstrijd(r[col.competition]) || "";
-      const year = getSeasonValue(r[col.season]) ?? "";
+      const year = seasonToDisplayYear(r[col.season]) ?? "";
       const dist = getDistanceKey(r[col.distance]) || norm(r[col.distance]);
       const medal = getMedalFromRanking(r[col.ranking]) || "";
       const pos = norm(r[col.ranking]);
